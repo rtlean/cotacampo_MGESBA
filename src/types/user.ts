@@ -36,6 +36,7 @@ export interface ProducerProfile {
   name: string;
   email: string;
   whatsapp: string;
+  password?: string;
   role: 'PRODUCER';
   farmName: string;
   state: SupportedState;
@@ -52,6 +53,7 @@ export interface ResellerProfile {
   cnpj: string;
   corporateEmail: string;
   whatsapp: string;
+  password?: string;
   state: SupportedState;
   city: string;
   deliveryRadiusKm: number;
@@ -61,6 +63,18 @@ export interface ResellerProfile {
 }
 
 export type UserProfile = ProducerProfile | ResellerProfile;
+
+export interface LoginCredentials {
+  identifier: string;
+  password: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  error?: string;
+  role?: UserRole;
+  user?: UserProfile;
+}
 
 export interface RegisterFormData {
   role: UserRole;

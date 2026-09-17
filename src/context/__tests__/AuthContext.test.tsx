@@ -122,4 +122,54 @@ describe('AuthContext - login unificado', () => {
     expect(response?.error).toBe('E-mail/telefone ou senha incorretos.');
     expect(result.current.isAuthenticated).toBe(false);
   });
+
+  describe('recuperação de senha (US04)', () => {
+    it('deve gerar token com expiração de 15 minutos ao solicitar recuperação para produtor existente', async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      let response: { success: boolean; message: string; expiresAt?: string; resetToken?: string } | undefined;
+      await act(async () => {
+        response = await result.current.requestPasswordReset('jose.produtor@fazenda.com.br');
+      });
+
+      expect(response?.success).toBe(true);
+      expect(response?.message).toMatch(/se este e-mail ou whatsapp estiver cadastrado/i);
+      expect(response?.resetToken).toBeDefined();
+      expect(response?.expiresAt).toBeDefined();
+
+      if (response?.expiresAt) {
+        const expiresTime = new Date(response.expiresAt).getTime();
+        const now = Date.now();
+        const diffMinutes = Math.round((expiresTime - now) / (60 * 1000));
+        expect(diffMinutes).toBe(15);
+      }
+    });
+
+    it('deve gerar token com expiração de 15 minutos ao solicitar recuperação para revenda por WhatsApp', async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      let response: { success: boolean; message: string; expiresAt?: string; resetToken?: string } | undefined;
+      await act(async () => {
+        response = await result.current.requestPasswordReset('27997773344');
+      });
+
+      expect(response?.success).toBe(true);
+      expect(response?.message).toMatch(/se este e-mail ou whatsapp estiver cadastrado/i);
+      expect(response?.resetToken).toBeDefined();
+    });
+
+    it('deve retornar resposta de sucesso genérica com mesma mensagem sem revelar inexistência de usuário', async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      let response: { success: boolean; message: string; resetToken?: string } | undefined;
+      await act(async () => {
+        response = await result.current.requestPasswordReset('nao.existe@agro.com');
+      });
+
+      expect(response?.success).toBe(true);
+      expect(response?.message).toMatch(/se este e-mail ou whatsapp estiver cadastrado/i);
+      // Não vaza token real para usuário inexistente
+      expect(response?.resetToken).toBeUndefined();
+    });
+  });
 });

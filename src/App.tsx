@@ -3,6 +3,7 @@ import { Route, Switch, Redirect } from 'wouter';
 import { Navbar } from './components/Navbar';
 import { RegisterPage } from './pages/RegisterPage';
 import { LoginPage } from './pages/LoginPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ProducerDashboard } from './pages/ProducerDashboard';
 import { ResellerDashboard } from './pages/ResellerDashboard';
 
@@ -15,6 +16,7 @@ export const App: React.FC = () => {
           <Route path="/" component={RegisterPage} />
           <Route path="/cadastro" component={RegisterPage} />
           <Route path="/login" component={LoginPage} />
+          <Route path="/recuperar-senha" component={ForgotPasswordPage} />
           <Route path="/produtor/dashboard" component={ProducerDashboard} />
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
           <Route>

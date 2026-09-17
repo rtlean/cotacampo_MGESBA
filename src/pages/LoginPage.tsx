@@ -131,6 +131,15 @@ export const LoginPage: React.FC = () => {
               icon={<Lock className="w-4 h-4" />}
             />
 
+            <div className="flex items-center justify-end -mt-1">
+              <Link
+                href="/recuperar-senha"
+                className="text-xs font-semibold text-agro-700 hover:text-agro-800 hover:underline"
+              >
+                Esqueceu sua senha?
+              </Link>
+            </div>
+
             <button
               type="submit"
               disabled={isSubmitting}

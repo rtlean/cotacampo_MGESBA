@@ -176,4 +176,16 @@ describe('US03 – Autenticação Unificada e Roteamento por Perfil', () => {
       expect(window.location.pathname).toBe('/produtor/dashboard');
     });
   });
+
+  it('deve exibir link para recuperação de senha direcionando para /recuperar-senha', () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    const forgotLink = screen.getByRole('link', { name: /esqueceu sua senha\?/i });
+    expect(forgotLink).toBeInTheDocument();
+    expect(forgotLink).toHaveAttribute('href', '/recuperar-senha');
+  });
 });

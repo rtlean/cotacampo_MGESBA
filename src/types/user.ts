@@ -128,3 +128,26 @@ export interface ResellerFormErrors {
   categories?: string;
   general?: string;
 }
+
+export interface PasswordResetRequest {
+  identifier: string;
+}
+
+export interface PasswordResetToken {
+  token: string;
+  identifier: string;
+  userRole?: UserRole;
+  expiresAt: string; // ISO String (15 minutos)
+  used: boolean;
+  createdAt: string;
+}
+
+export interface PasswordResetResponse {
+  success: boolean;
+  message: string;
+  channel?: 'email' | 'whatsapp';
+  expiresAt?: string;
+  resetToken?: string;
+  resetUrl?: string;
+}
+

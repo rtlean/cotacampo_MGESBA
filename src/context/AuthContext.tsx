@@ -3,6 +3,8 @@ import {
   AuthResponse,
   CropId,
   LoginCredentials,
+  PasswordResetResponse,
+  PasswordResetToken,
   ProducerProfile,
   RegisterFormData,
   ResellerFormData,
@@ -23,11 +25,13 @@ interface AuthContextType {
   loginMock: (email: string) => void;
   logout: () => void;
   dismissWelcomeNotice: () => void;
+  requestPasswordReset: (identifier: string) => Promise<PasswordResetResponse>;
 }
 
 const STORAGE_KEY = 'cotacampo_auth_user';
 const PRODUCERS_DB_KEY = 'cotacampo_producers_db';
 const RESELLERS_DB_KEY = 'cotacampo_resellers_db';
+const RESETS_DB_KEY = 'cotacampo_password_resets';
 const WELCOME_KEY = 'cotacampo_welcome_notice';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -314,6 +318,124 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionStorage.removeItem(WELCOME_KEY);
   };
 
+  const requestPasswordReset = async (rawIdentifier: string): Promise<PasswordResetResponse> => {
+    try {
+      const cleanInput = rawIdentifier.trim();
+      if (!cleanInput) {
+        return {
+          success: false,
+          message: 'Informe um e-mail válido ou número de WhatsApp com DDD.',
+        };
+      }
+
+      const lowerEmail = cleanInput.toLowerCase();
+      const digitsOnly = cleanInput.replace(/\D/g, '');
+
+      // Busca em produtores
+      let producers: ProducerProfile[] = [];
+      try {
+        const stored = localStorage.getItem(PRODUCERS_DB_KEY);
+        if (stored) producers = JSON.parse(stored);
+      } catch {
+        producers = [];
+      }
+
+      // Busca em revendas
+      let resellers: ResellerProfile[] = [];
+      try {
+        const stored = localStorage.getItem(RESELLERS_DB_KEY);
+        if (stored) resellers = JSON.parse(stored);
+      } catch {
+        resellers = [];
+      }
+
+      const foundProducer = producers.find(
+        (p) =>
+          p.email.toLowerCase() === lowerEmail ||
+          p.whatsapp.replace(/\D/g, '') === digitsOnly
+      );
+
+      const foundReseller = resellers.find(
+        (r) =>
+          r.corporateEmail.toLowerCase() === lowerEmail ||
+          r.whatsapp.replace(/\D/g, '') === digitsOnly ||
+          r.cnpj.replace(/\D/g, '') === digitsOnly
+      );
+
+      // Contas demo pré-configuradas para facilidade de testes
+      const isDemo =
+        lowerEmail === 'produtor.linhares@agro.com.br' ||
+        lowerEmail === 'produtor@fazendaboa.com.br' ||
+        lowerEmail === 'revenda.linhares@agro.com.br' ||
+        lowerEmail === 'contato@agrovilainsumos.com.br' ||
+        digitsOnly === '27998765432' ||
+        digitsOnly === '27998887766';
+
+      const userExists = !!foundProducer || !!foundReseller || isDemo;
+      const userRole = foundProducer
+        ? 'PRODUCER'
+        : foundReseller
+        ? 'RESELLER'
+        : isDemo
+        ? (lowerEmail.includes('revenda') ? 'RESELLER' : 'PRODUCER')
+        : undefined;
+
+      // Mensagem padronizada de alta segurança (anti-enumeração)
+      const genericMessage =
+        'Se este e-mail ou WhatsApp estiver cadastrado, enviamos um link com token de uso único para redefinir sua senha. O link é válido por 15 minutos.';
+
+      if (!userExists) {
+        // Não revela a inexistência do usuário na base de dados
+        return {
+          success: true,
+          message: genericMessage,
+        };
+      }
+
+      // Usuário existe: gera token de uso único com expiração em 15 minutos
+      const token = 'rst_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const channel: 'email' | 'whatsapp' = cleanInput.includes('@') ? 'email' : 'whatsapp';
+
+      const resetRecord: PasswordResetToken = {
+        token,
+        identifier: cleanInput,
+        userRole,
+        expiresAt,
+        used: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      let resetList: PasswordResetToken[] = [];
+      try {
+        const stored = localStorage.getItem(RESETS_DB_KEY);
+        if (stored) resetList = JSON.parse(stored);
+      } catch {
+        resetList = [];
+      }
+      resetList.push(resetRecord);
+      localStorage.setItem(RESETS_DB_KEY, JSON.stringify(resetList));
+
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://cotacampo-es-36ja.vercel.app';
+      const resetUrl = `${baseUrl}/redefinir-senha?token=${token}`;
+
+      return {
+        success: true,
+        message: genericMessage,
+        channel,
+        expiresAt,
+        resetToken: token,
+        resetUrl,
+      };
+    } catch {
+      return {
+        success: true,
+        message:
+          'Se este e-mail ou WhatsApp estiver cadastrado, enviamos um link com token de uso único para redefinir sua senha. O link é válido por 15 minutos.',
+      };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -326,6 +448,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginMock,
         logout,
         dismissWelcomeNotice,
+        requestPasswordReset,
       }}
     >
       {children}

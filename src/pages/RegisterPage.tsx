@@ -4,6 +4,7 @@ import { useLocation, Link } from 'wouter';
 import { FormInput } from '../components/FormInput';
 import { CropSelector } from '../components/CropSelector';
 import { SUPPORTED_STATES, TOP_MUNICIPALITIES } from '../data/locations';
+import { producerRegistrationSchema } from '../schemas/producer.schema';
 import { FormErrors, RegisterFormData, SupportedState } from '../types/user';
 import {
   User,
@@ -73,75 +74,45 @@ export const RegisterPage: React.FC = () => {
     }));
   };
 
-  const validateForm = (): { isValid: boolean; firstErrorRef: React.RefObject<any> | null } => {
+  const validateForm = (): { isValid: boolean; firstErrorRef: React.RefObject<HTMLElement | null> | null } => {
+    const parseResult = producerRegistrationSchema.safeParse(formData);
+
+    if (parseResult.success) {
+      setErrors({});
+      return { isValid: true, firstErrorRef: null };
+    }
+
     const newErrors: FormErrors = {};
-    let firstRef: React.RefObject<any> | null = null;
-
-    // Full Name
-    if (!formData.fullName.trim()) {
-      newErrors.fullName = 'Informe seu nome completo';
-      firstRef = firstRef || fullNameRef;
-    } else if (formData.fullName.trim().split(' ').length < 2) {
-      newErrors.fullName = 'Informe nome e sobrenome';
-      firstRef = firstRef || fullNameRef;
+    for (const issue of parseResult.error.issues) {
+      const field = issue.path[0] as keyof FormErrors;
+      if (!newErrors[field]) {
+        newErrors[field] = issue.message;
+      }
     }
 
-    // Email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!formData.email.trim()) {
-      newErrors.email = 'Informe um endereço de e-mail';
-      firstRef = firstRef || emailRef;
-    } else if (!emailRegex.test(formData.email.trim())) {
-      newErrors.email = 'Formato de e-mail inválido (ex: produtor@fazenda.com.br)';
-      firstRef = firstRef || emailRef;
-    }
+    // Identifica o primeiro campo com erro na ordem visual do DOM para auto-foco
+    const fieldOrder: Array<{ field: keyof FormErrors; ref: React.RefObject<HTMLElement | null> }> = [
+      { field: 'fullName', ref: fullNameRef },
+      { field: 'email', ref: emailRef },
+      { field: 'whatsapp', ref: whatsappRef },
+      { field: 'password', ref: passwordRef },
+      { field: 'farmName', ref: farmNameRef },
+      { field: 'state', ref: stateRef },
+      { field: 'city', ref: cityRef },
+      { field: 'crops', ref: cropsRef },
+    ];
 
-    // WhatsApp
-    const rawPhoneDigits = formData.whatsapp.replace(/\D/g, '');
-    if (!formData.whatsapp.trim()) {
-      newErrors.whatsapp = 'Informe seu número de WhatsApp';
-      firstRef = firstRef || whatsappRef;
-    } else if (rawPhoneDigits.length < 10 || rawPhoneDigits.length > 11) {
-      newErrors.whatsapp = 'Número de WhatsApp inválido. Utilize DDD + 9 dígitos: (XX) 9XXXX-XXXX';
-      firstRef = firstRef || whatsappRef;
-    }
-
-    // Password
-    if (!formData.password) {
-      newErrors.password = 'Crie uma senha de acesso';
-      firstRef = firstRef || passwordRef;
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'A senha deve ter no mínimo 6 caracteres';
-      firstRef = firstRef || passwordRef;
-    }
-
-    // Farm Name
-    if (!formData.farmName.trim()) {
-      newErrors.farmName = 'Informe o nome da sua fazenda ou propriedade';
-      firstRef = firstRef || farmNameRef;
-    }
-
-    // State
-    if (!formData.state) {
-      newErrors.state = 'Selecione o estado da propriedade (MG, ES ou BA)';
-      firstRef = firstRef || stateRef;
-    }
-
-    // City
-    if (!formData.city.trim()) {
-      newErrors.city = 'Informe o município da propriedade';
-      firstRef = firstRef || cityRef;
-    }
-
-    // Cultivated Crops
-    if (!formData.crops || formData.crops.length === 0) {
-      newErrors.crops = 'Selecione ao menos uma cultura atendida (Café, Cacau, Pimenta-do-reino ou Mamão)';
-      firstRef = firstRef || cropsRef;
+    let firstRef: React.RefObject<HTMLElement | null> | null = null;
+    for (const item of fieldOrder) {
+      if (newErrors[item.field]) {
+        firstRef = item.ref;
+        break;
+      }
     }
 
     setErrors(newErrors);
     return {
-      isValid: Object.keys(newErrors).length === 0,
+      isValid: false,
       firstErrorRef: firstRef,
     };
   };

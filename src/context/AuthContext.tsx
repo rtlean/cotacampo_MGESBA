@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { ProducerProfile, RegisterFormData } from '../types/user';
+import { CropId, ProducerProfile, RegisterFormData } from '../types/user';
+import { producerRegistrationSchema } from '../schemas/producer.schema';
 
 interface AuthContextType {
   user: ProducerProfile | null;
@@ -40,19 +41,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const registerProducer = async (data: RegisterFormData): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Simula validação e latência de rede realista
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const validation = producerRegistrationSchema.safeParse(data);
+      if (!validation.success) {
+        return {
+          success: false,
+          error: validation.error.issues[0]?.message || 'Dados inválidos para cadastro de produtor',
+        };
+      }
+
+      const validData = validation.data;
+
+      // Simula latência de rede realista
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const newProducer: ProducerProfile = {
         id: 'prod_' + Math.random().toString(36).substring(2, 9),
-        name: data.fullName.trim(),
-        email: data.email.trim().toLowerCase(),
-        whatsapp: data.whatsapp.trim(),
+        name: validData.fullName,
+        email: validData.email.toLowerCase(),
+        whatsapp: validData.whatsapp,
         role: 'PRODUCER',
-        farmName: data.farmName.trim(),
-        state: data.state as any,
-        city: data.city.trim(),
-        crops: data.crops,
+        farmName: validData.farmName,
+        state: validData.state,
+        city: validData.city,
+        crops: validData.crops,
         createdAt: new Date().toISOString(),
       };
 
@@ -61,8 +72,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionStorage.setItem(WELCOME_KEY, 'true');
 
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Falha ao registrar produtor' };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Falha ao registrar produtor';
+      return { success: false, error: message };
     }
   };
 
@@ -76,7 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       farmName: 'Fazenda Terra Santa',
       state: 'ES' as const,
       city: 'Linhares',
-      crops: ['cafe', 'pimenta'] as any,
+      crops: ['cafe', 'pimenta'] as CropId[],
       createdAt: new Date().toISOString(),
     };
     setUser(existing);

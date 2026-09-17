@@ -20,7 +20,7 @@ export const ProducerDashboard: React.FC = () => {
   const { user, showWelcomeNotice, dismissWelcomeNotice } = useAuth();
 
   // If accessed directly without user, fallback display or redirect
-  if (!user) {
+  if (!user || user.role !== 'PRODUCER') {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-6 text-center">
         <div className="bg-white p-8 rounded-2xl shadow-soft border border-slate-200 max-w-md">

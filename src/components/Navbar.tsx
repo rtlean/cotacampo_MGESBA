@@ -12,6 +12,14 @@ export const Navbar: React.FC = () => {
     setLocation('/login');
   };
 
+  const displayName = user
+    ? user.role === 'RESELLER'
+      ? user.nomeFantasia
+      : user.farmName || user.name
+    : '';
+
+  const dashboardPath = user?.role === 'RESELLER' ? '/revenda/dashboard' : '/produtor/dashboard';
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-agro-100 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -38,32 +46,32 @@ export const Navbar: React.FC = () => {
             {isAuthenticated && user ? (
               <div className="flex items-center gap-3">
                 <Link
-                  href="/produtor/dashboard"
+                  href={dashboardPath}
                   className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-agro-50 text-agro-800 text-xs font-medium border border-agro-200"
                 >
                   <User className="w-3.5 h-3.5 text-agro-600" />
-                  <span>
-                    {user.farmName ? user.farmName : user.name}
-                  </span>
+                  <span>{displayName}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-agro-700 text-white">
-                    PRODUTOR
+                    {user.role === 'RESELLER' ? 'REVENDA' : 'PRODUTOR'}
                   </span>
                 </Link>
 
-                <button
-                  type="button"
-                  onClick={() => alert('O módulo de publicação de cotação estará disponível na próxima história (US02).')}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-agro-600 hover:bg-agro-700 text-white text-xs font-semibold shadow-sm transition-colors"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span className="hidden sm:inline">Nova Cotação</span>
-                </button>
+                {user.role === 'PRODUCER' && (
+                  <button
+                    type="button"
+                    onClick={() => alert('O módulo de publicação de cotação estará disponível em breve.')}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-agro-600 hover:bg-agro-700 text-white text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span className="hidden sm:inline">Nova Cotação</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
                   onClick={handleLogout}
                   title="Sair da conta"
-                  className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                  className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>

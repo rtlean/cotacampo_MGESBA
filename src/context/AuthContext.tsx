@@ -1,24 +1,35 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { CropId, ProducerProfile, RegisterFormData } from '../types/user';
+import {
+  CropId,
+  ProducerProfile,
+  RegisterFormData,
+  ResellerFormData,
+  ResellerProfile,
+  UserProfile,
+} from '../types/user';
 import { producerRegistrationSchema } from '../schemas/producer.schema';
+import { resellerRegistrationSchema } from '../schemas/reseller.schema';
+import { getCityCoordinates } from '../data/locations';
 
 interface AuthContextType {
-  user: ProducerProfile | null;
+  user: UserProfile | null;
   isAuthenticated: boolean;
   showWelcomeNotice: boolean;
   registerProducer: (data: RegisterFormData) => Promise<{ success: boolean; error?: string }>;
+  registerReseller: (data: ResellerFormData) => Promise<{ success: boolean; error?: string }>;
   loginMock: (email: string) => void;
   logout: () => void;
   dismissWelcomeNotice: () => void;
 }
 
 const STORAGE_KEY = 'cotacampo_auth_user';
+const RESELLERS_DB_KEY = 'cotacampo_resellers_db';
 const WELCOME_KEY = 'cotacampo_welcome_notice';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<ProducerProfile | null>(() => {
+  const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       return stored ? JSON.parse(stored) : null;
@@ -78,19 +89,95 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const registerReseller = async (data: ResellerFormData): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // 1. Checagem de CNPJ duplicado na base existente
+      const cleanInputCnpj = data.cnpj.replace(/\D/g, '');
+      let existingResellers: Array<{ cnpj?: string }> = [];
+      try {
+        const stored = localStorage.getItem(RESELLERS_DB_KEY);
+        if (stored) {
+          existingResellers = JSON.parse(stored);
+        }
+      } catch {
+        existingResellers = [];
+      }
+
+      const isDuplicate = existingResellers.some((r) => {
+        const storedCnpj = (r.cnpj || '').replace(/\D/g, '');
+        return storedCnpj === cleanInputCnpj;
+      });
+
+      if (isDuplicate) {
+        return {
+          success: false,
+          error: 'Este CNPJ já está cadastrado. Faça login ou recupere o acesso.',
+        };
+      }
+
+      // 2. Validação de schema com Zod
+      const validation = resellerRegistrationSchema.safeParse(data);
+      if (!validation.success) {
+        return {
+          success: false,
+          error: validation.error.issues[0]?.message || 'Dados inválidos para cadastro de revenda',
+        };
+      }
+
+      const validData = validation.data;
+
+      // Simula latência de rede realista
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const coords = getCityCoordinates(validData.city, validData.state);
+
+      const newReseller: ResellerProfile = {
+        id: 'res_' + Math.random().toString(36).substring(2, 9),
+        role: 'RESELLER',
+        razaoSocial: validData.razaoSocial,
+        nomeFantasia: validData.nomeFantasia,
+        cnpj: validData.cnpj,
+        corporateEmail: validData.corporateEmail.toLowerCase(),
+        whatsapp: validData.whatsapp,
+        state: validData.state,
+        city: validData.city,
+        deliveryRadiusKm: validData.deliveryRadiusKm,
+        coordinates: coords,
+        categories: validData.categories,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Persistir no banco de revendas
+      existingResellers.push(newReseller);
+      localStorage.setItem(RESELLERS_DB_KEY, JSON.stringify(existingResellers));
+
+      // Ativar sessão do usuário
+      setUser(newReseller);
+      setShowWelcomeNotice(true);
+      sessionStorage.setItem(WELCOME_KEY, 'true');
+
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Falha ao registrar revenda';
+      return { success: false, error: message };
+    }
+  };
+
   const loginMock = (email: string) => {
-    const existing = user && user.email === email ? user : {
-      id: 'prod_demo123',
-      name: 'João Produtor Rural',
-      email: email || 'produtor@fazendaboa.com.br',
-      whatsapp: '(27) 99876-5432',
-      role: 'PRODUCER' as const,
-      farmName: 'Fazenda Terra Santa',
-      state: 'ES' as const,
-      city: 'Linhares',
-      crops: ['cafe', 'pimenta'] as CropId[],
-      createdAt: new Date().toISOString(),
-    };
+    const existing = user && ('email' in user ? user.email === email : user.corporateEmail === email)
+      ? user
+      : {
+          id: 'prod_demo123',
+          name: 'João Produtor Rural',
+          email: email || 'produtor@fazendaboa.com.br',
+          whatsapp: '(27) 99876-5432',
+          role: 'PRODUCER' as const,
+          farmName: 'Fazenda Terra Santa',
+          state: 'ES' as const,
+          city: 'Linhares',
+          crops: ['cafe', 'pimenta'] as CropId[],
+          createdAt: new Date().toISOString(),
+        };
     setUser(existing);
   };
 
@@ -113,6 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         showWelcomeNotice,
         registerProducer,
+        registerReseller,
         loginMock,
         logout,
         dismissWelcomeNotice,

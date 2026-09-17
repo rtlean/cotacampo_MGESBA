@@ -1,6 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { AuthResponse, PasswordResetResponse, ResetPasswordResponse } from '../../types/user';
 
 describe('AuthContext - login unificado', () => {
   const mockProducer = {
@@ -170,6 +171,54 @@ describe('AuthContext - login unificado', () => {
       expect(response?.message).toMatch(/se este e-mail ou whatsapp estiver cadastrado/i);
       // Não vaza token real para usuário inexistente
       expect(response?.resetToken).toBeUndefined();
+    });
+
+    it('deve redefinir a senha com sucesso e permitir login com a nova senha, bloqueando a senha antiga', async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      // 1. Solicita recuperação para produtor
+      let reqResponse: PasswordResetResponse | undefined;
+      await act(async () => {
+        reqResponse = await result.current.requestPasswordReset('jose.produtor@fazenda.com.br');
+      });
+
+      expect(reqResponse?.success).toBe(true);
+      expect(reqResponse?.resetToken).toBeDefined();
+
+      // 2. Redefine a senha utilizando o token gerado
+      let resetResponse: ResetPasswordResponse | undefined;
+      await act(async () => {
+        resetResponse = await result.current.resetPassword(
+          reqResponse?.resetToken || '',
+          'NovaSenhaDefinitiva@2026'
+        );
+      });
+
+      expect(resetResponse?.success).toBe(true);
+
+      // 3. Tenta login com a senha antiga -> Deve ser rejeitado!
+      let oldLoginResponse: AuthResponse | undefined;
+      await act(async () => {
+        oldLoginResponse = await result.current.login({
+          identifier: 'jose.produtor@fazenda.com.br',
+          password: 'SenhaProdutor@2026',
+        });
+      });
+
+      expect(oldLoginResponse?.success).toBe(false);
+
+      // 4. Tenta login com a NOVA senha -> Deve autenticar com sucesso!
+      let newLoginResponse: AuthResponse | undefined;
+      await act(async () => {
+        newLoginResponse = await result.current.login({
+          identifier: 'jose.produtor@fazenda.com.br',
+          password: 'NovaSenhaDefinitiva@2026',
+        });
+      });
+
+      expect(newLoginResponse?.success).toBe(true);
+      expect(newLoginResponse?.role).toBe('PRODUCER');
+      expect(result.current.isAuthenticated).toBe(true);
     });
   });
 });

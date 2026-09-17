@@ -86,4 +86,21 @@ describe('ForgotPasswordPage', () => {
 
     expect(screen.getByLabelText(/e-mail ou whatsapp/i)).toBeInTheDocument();
   });
+
+  it('deve gerar link de abertura no WhatsApp com código de 6 dígitos quando solicitado por telefone', async () => {
+    renderWithAuth(<ForgotPasswordPage />);
+
+    const input = screen.getByLabelText(/e-mail ou whatsapp/i);
+    fireEvent.change(input, { target: { value: '27998765432' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /enviar link de redefinição/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      const whatsappLink = screen.getByRole('link', { name: /abrir no whatsapp/i });
+      expect(whatsappLink).toBeInTheDocument();
+      expect(whatsappLink.getAttribute('href')).toMatch(/api\.whatsapp\.com\/send\?phone=5527998765432/);
+      expect(screen.getByRole('link', { name: /cadastrar nova senha com este código/i })).toBeInTheDocument();
+    });
+  });
 });

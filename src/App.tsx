@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { RegisterPage } from './pages/RegisterPage';
 import { LoginPage } from './pages/LoginPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { ProducerDashboard } from './pages/ProducerDashboard';
 import { ResellerDashboard } from './pages/ResellerDashboard';
 
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
           <Route path="/cadastro" component={RegisterPage} />
           <Route path="/login" component={LoginPage} />
           <Route path="/recuperar-senha" component={ForgotPasswordPage} />
+          <Route path="/redefinir-senha" component={ResetPasswordPage} />
           <Route path="/produtor/dashboard" component={ProducerDashboard} />
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
           <Route>

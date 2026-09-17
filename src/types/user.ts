@@ -135,6 +135,7 @@ export interface PasswordResetRequest {
 
 export interface PasswordResetToken {
   token: string;
+  code: string; // 6 dígitos numéricos
   identifier: string;
   userRole?: UserRole;
   expiresAt: string; // ISO String (15 minutos)
@@ -146,8 +147,24 @@ export interface PasswordResetResponse {
   success: boolean;
   message: string;
   channel?: 'email' | 'whatsapp';
+  code?: string;
   expiresAt?: string;
   resetToken?: string;
   resetUrl?: string;
+  whatsappUrl?: string;
+  deliveryStatus?: 'sent' | 'rate_limited' | 'error';
+  errorMessage?: string;
 }
+
+export interface ResetPasswordInput {
+  tokenOrCode: string;
+  newPassword: string;
+}
+
+export interface ResetPasswordResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 

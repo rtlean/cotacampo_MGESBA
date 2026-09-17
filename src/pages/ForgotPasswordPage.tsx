@@ -13,8 +13,8 @@ import {
   Clock,
   Send,
   AlertCircle,
-  ExternalLink,
-  MessageSquare,
+  ArrowRight,
+  MessageCircle,
 } from 'lucide-react';
 
 export const ForgotPasswordPage: React.FC = () => {
@@ -67,6 +67,15 @@ export const ForgotPasswordPage: React.FC = () => {
     try {
       const response = await requestPasswordReset(identifier);
       setResetResult(response);
+
+      // Se canal WhatsApp com URL gerada, tenta abrir diretamente o WhatsApp Web / App
+      if (response.channel === 'whatsapp' && response.whatsappUrl && typeof window !== 'undefined') {
+        try {
+          window.open(response.whatsappUrl, '_blank');
+        } catch {
+          // Bloqueado pelo pop-up blocker; usuário utilizará o botão na tela
+        }
+      }
     } catch {
       setError('Ocorreu um erro ao processar sua solicitação. Tente novamente.');
     } finally {
@@ -92,7 +101,7 @@ export const ForgotPasswordPage: React.FC = () => {
             Recuperar Acesso
           </h1>
           <p className="mt-2 text-sm text-slate-600">
-            Informe seu e-mail ou WhatsApp cadastrado para receber as instruções
+            Informe seu e-mail ou WhatsApp cadastrado para receber o link ou código
           </p>
         </div>
 
@@ -129,7 +138,7 @@ export const ForgotPasswordPage: React.FC = () => {
               <div className="rounded-xl bg-agro-50/60 p-3.5 border border-agro-100/80 flex items-start gap-3 text-xs text-agro-900">
                 <ShieldCheck className="w-4 h-4 text-agro-700 shrink-0 mt-0.5" />
                 <p>
-                  Por segurança, enviamos um token de uso único com expiração em <strong>15 minutos</strong>.
+                  Enviamos um link com código de 6 dígitos e token de uso único com validade de <strong>15 minutos</strong>.
                 </p>
               </div>
 
@@ -159,8 +168,8 @@ export const ForgotPasswordPage: React.FC = () => {
               </div>
             </form>
           ) : (
-            /* Confirmation State with strict anti-enumeration compliance */
-            <div role="status" className="space-y-6 animate-fade-in text-center">
+            /* Confirmation State with real dispatch feedback and anti-enumeration compliance */
+            <div role="status" className="space-y-5 animate-fade-in text-center">
               <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-sm">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
@@ -174,41 +183,89 @@ export const ForgotPasswordPage: React.FC = () => {
                 </p>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-left text-xs text-slate-500 flex items-start gap-2.5">
-                <Clock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                <span>
-                  Verifique sua caixa de entrada, spam ou mensagens no WhatsApp. O link expirará automaticamente após 15 minutos.
-                </span>
-              </div>
-
-              {/* Demo Test Assistant (Exibido para facilidade de homologação imediata do cliente) */}
-              {resetResult.resetToken && (
-                <div className="p-3.5 rounded-xl bg-agro-50 border border-agro-200 text-left text-xs space-y-2">
-                  <div className="flex items-center justify-between font-semibold text-agro-900">
-                    <span className="flex items-center gap-1.5">
-                      <MessageSquare className="w-3.5 h-3.5 text-agro-700" />
-                      Simulação no Campo (Homologação)
-                    </span>
-                    <span className="text-[10px] bg-agro-200/80 text-agro-800 px-1.5 py-0.5 rounded font-mono">
-                      Token Válido 15m
-                    </span>
-                  </div>
-                  <p className="text-agro-800 text-[11px]">
-                    Canal identificado: <strong>{resetResult.channel === 'whatsapp' ? 'WhatsApp' : 'E-mail'}</strong>.
-                  </p>
-                  <div className="flex items-center gap-2 pt-1">
+              {/* Canal WhatsApp: Disparo e Botão de Abertura Real */}
+              {resetResult.channel === 'whatsapp' && (
+                <div className="space-y-3 pt-1">
+                  {resetResult.whatsappUrl && (
                     <a
-                      href={resetResult.resetUrl || '#'}
+                      href={resetResult.whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-agro-700 text-white font-medium text-[11px] hover:bg-agro-800 transition-colors"
+                      className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold text-sm shadow-md shadow-emerald-900/10 transition-colors inline-flex items-center justify-center gap-2"
                     >
-                      <span>Abrir link de redefinição</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <MessageCircle className="w-5 h-5" />
+                      <span>Abrir no WhatsApp e Enviar Mensagem</span>
                     </a>
-                  </div>
+                  )}
+
+                  {resetResult.code && (
+                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-2">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Código de 6 dígitos gerado:
+                      </span>
+                      <div className="text-2xl font-mono font-bold text-agro-800 tracking-widest bg-white py-1.5 px-4 rounded-lg border border-slate-200 inline-block shadow-sm">
+                        {resetResult.code}
+                      </div>
+                      <div className="pt-1">
+                        <Link
+                          href={`/redefinir-senha?token=${resetResult.resetToken}&code=${resetResult.code}`}
+                          className="w-full py-2.5 px-3 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <span>Cadastrar Nova Senha com este Código</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Canal E-mail: Feedback Real de Envio e Diagnóstico Técnico */}
+              {resetResult.channel === 'email' && (
+                <div className="space-y-3 pt-1">
+                  {resetResult.deliveryStatus === 'rate_limited' ? (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-900 flex items-start gap-2.5">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block font-semibold">Diagnóstico do Envio de E-mail</strong>
+                        <span>{resetResult.errorMessage}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-left text-xs text-emerald-900 flex items-start gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <span>E-mail com instruções e link de recuperação enviado com sucesso.</span>
+                    </div>
+                  )}
+
+                  {resetResult.code && (
+                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-2">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Código de 6 dígitos gerado:
+                      </span>
+                      <div className="text-2xl font-mono font-bold text-agro-800 tracking-widest bg-white py-1.5 px-4 rounded-lg border border-slate-200 inline-block shadow-sm">
+                        {resetResult.code}
+                      </div>
+                      <div className="pt-1">
+                        <Link
+                          href={`/redefinir-senha?token=${resetResult.resetToken}&code=${resetResult.code}`}
+                          className="w-full py-2.5 px-3 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <span>Cadastrar Nova Senha com este Código</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-left text-xs text-slate-500 flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                <span>
+                  O link e o código expiram automaticamente após 15 minutos por segurança.
+                </span>
+              </div>
 
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <button

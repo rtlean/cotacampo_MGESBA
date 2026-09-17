@@ -9,6 +9,7 @@ import {
   RegisterFormData,
   ResellerFormData,
   ResellerProfile,
+  ResetPasswordResponse,
   UserProfile,
 } from '../types/user';
 import { producerRegistrationSchema } from '../schemas/producer.schema';
@@ -26,6 +27,7 @@ interface AuthContextType {
   logout: () => void;
   dismissWelcomeNotice: () => void;
   requestPasswordReset: (identifier: string) => Promise<PasswordResetResponse>;
+  resetPassword: (tokenOrCode: string, newPassword: string) => Promise<ResetPasswordResponse>;
 }
 
 const STORAGE_KEY = 'cotacampo_auth_user';
@@ -392,13 +394,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
-      // Usuário existe: gera token de uso único com expiração em 15 minutos
+      // Usuário existe: gera token de uso único e código numérico de 6 dígitos
       const token = 'rst_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-      const channel: 'email' | 'whatsapp' = cleanInput.includes('@') ? 'email' : 'whatsapp';
+      const isEmail = cleanInput.includes('@');
+      const channel: 'email' | 'whatsapp' = isEmail ? 'email' : 'whatsapp';
 
       const resetRecord: PasswordResetToken = {
         token,
+        code,
         identifier: cleanInput,
         userRole,
         expiresAt,
@@ -417,15 +422,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(RESETS_DB_KEY, JSON.stringify(resetList));
 
       const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://cotacampo-es-36ja.vercel.app';
-      const resetUrl = `${baseUrl}/redefinir-senha?token=${token}`;
+      const resetUrl = `${baseUrl}/redefinir-senha?token=${token}&code=${code}`;
+
+      let whatsappUrl: string | undefined;
+      let deliveryStatus: 'sent' | 'rate_limited' | 'error' = 'sent';
+      let errorMessage: string | undefined;
+
+      if (channel === 'whatsapp') {
+        const rawPhone = digitsOnly.length <= 11 ? '55' + digitsOnly : digitsOnly;
+        const msg = `🌾 *CotaCampo - Recuperação de Senha*\n\nOlá! Recebemos uma solicitação para sua conta.\n\nSeu código de verificação é: *${code}*\n\nOu acesse o link abaixo para criar sua nova senha:\n${resetUrl}\n\n⏱️ _Este link e código expiram em 15 minutos._`;
+        whatsappUrl = `https://api.whatsapp.com/send?phone=${rawPhone}&text=${encodeURIComponent(msg)}`;
+        deliveryStatus = 'sent';
+      } else {
+        // Envio real por e-mail via Supabase Auth
+        try {
+          const resp = await fetch('https://uwrvxmlgvgvvqmtucidk.supabase.co/auth/v1/recover', {
+            method: 'POST',
+            headers: {
+              apikey: 'sb_publishable_y5aPNNUO7xqZj8-m6lPsuQ_4trcol-t',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: lowerEmail }),
+          });
+
+          if (resp.status === 429) {
+            deliveryStatus = 'rate_limited';
+            errorMessage =
+              'Limite de disparos de e-mail por hora do provedor atingido. Utilize o código de verificação de 6 dígitos gerado para prosseguir com a redefinição.';
+          } else if (!resp.ok) {
+            deliveryStatus = 'error';
+            errorMessage = 'O provedor de e-mails retornou uma falha de envio.';
+          } else {
+            deliveryStatus = 'sent';
+          }
+        } catch {
+          deliveryStatus = 'error';
+          errorMessage = 'Não foi possível conectar ao servidor de e-mails.';
+        }
+      }
 
       return {
         success: true,
         message: genericMessage,
         channel,
+        code,
         expiresAt,
         resetToken: token,
         resetUrl,
+        whatsappUrl,
+        deliveryStatus,
+        errorMessage,
       };
     } catch {
       return {
@@ -433,6 +479,119 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         message:
           'Se este e-mail ou WhatsApp estiver cadastrado, enviamos um link com token de uso único para redefinir sua senha. O link é válido por 15 minutos.',
       };
+    }
+  };
+
+  const resetPassword = async (
+    tokenOrCode: string,
+    newPassword: string
+  ): Promise<ResetPasswordResponse> => {
+    try {
+      const cleanInput = tokenOrCode.trim();
+      if (!cleanInput) {
+        return { success: false, error: 'Informe o código de 6 dígitos ou token de redefinição.' };
+      }
+      if (!newPassword || newPassword.length < 6) {
+        return { success: false, error: 'A senha deve ter no mínimo 6 caracteres.' };
+      }
+
+      let resetList: PasswordResetToken[] = [];
+      try {
+        const stored = localStorage.getItem(RESETS_DB_KEY);
+        if (stored) resetList = JSON.parse(stored);
+      } catch {
+        resetList = [];
+      }
+
+      const match = resetList.find(
+        (r) => r.token === cleanInput || r.code === cleanInput
+      );
+
+      if (!match) {
+        return { success: false, error: 'Código ou token de redefinição inválido.' };
+      }
+
+      if (match.used) {
+        return { success: false, error: 'Este código ou token de redefinição já foi utilizado.' };
+      }
+
+      const expiresTime = new Date(match.expiresAt).getTime();
+      if (expiresTime < Date.now()) {
+        return {
+          success: false,
+          error: 'Este código ou token de redefinição está expirado (validade de 15 minutos).',
+        };
+      }
+
+      const targetIdentifier = match.identifier.toLowerCase();
+      const targetDigits = match.identifier.replace(/\D/g, '');
+
+      // 1. Produtores
+      let producers: ProducerProfile[] = [];
+      try {
+        const stored = localStorage.getItem(PRODUCERS_DB_KEY);
+        if (stored) producers = JSON.parse(stored);
+      } catch {
+        producers = [];
+      }
+
+      let userUpdated = false;
+      const updatedProducers = producers.map((p) => {
+        if (
+          p.email.toLowerCase() === targetIdentifier ||
+          p.whatsapp.replace(/\D/g, '') === targetDigits
+        ) {
+          userUpdated = true;
+          return { ...p, password: newPassword };
+        }
+        return p;
+      });
+
+      if (userUpdated) {
+        localStorage.setItem(PRODUCERS_DB_KEY, JSON.stringify(updatedProducers));
+      }
+
+      // 2. Revendas
+      let resellers: ResellerProfile[] = [];
+      try {
+        const stored = localStorage.getItem(RESELLERS_DB_KEY);
+        if (stored) resellers = JSON.parse(stored);
+      } catch {
+        resellers = [];
+      }
+
+      const updatedResellers = resellers.map((r) => {
+        if (
+          r.corporateEmail.toLowerCase() === targetIdentifier ||
+          r.whatsapp.replace(/\D/g, '') === targetDigits ||
+          r.cnpj.replace(/\D/g, '') === targetDigits
+        ) {
+          userUpdated = true;
+          return { ...r, password: newPassword };
+        }
+        return r;
+      });
+
+      if (userUpdated) {
+        localStorage.setItem(RESELLERS_DB_KEY, JSON.stringify(updatedResellers));
+      }
+
+      // 3. Se for usuário ativo na sessão
+      if (user) {
+        setUser({ ...user, password: newPassword });
+      }
+
+      // Marca token como utilizado
+      match.used = true;
+      localStorage.setItem(RESETS_DB_KEY, JSON.stringify(resetList));
+
+      return {
+        success: true,
+        message: 'Senha redefinida com sucesso! Acesse sua conta com a nova senha.',
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Falha ao redefinir senha';
+      return { success: false, error: message };
     }
   };
 
@@ -449,6 +608,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         dismissWelcomeNotice,
         requestPasswordReset,
+        resetPassword,
       }}
     >
       {children}

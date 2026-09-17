@@ -15,6 +15,7 @@ import {
 import { producerRegistrationSchema } from '../schemas/producer.schema';
 import { resellerRegistrationSchema } from '../schemas/reseller.schema';
 import { getCityCoordinates } from '../data/locations';
+import { dbSyncService } from '../services/db-sync.service';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -100,6 +101,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       existingProducers.push(newProducer);
       localStorage.setItem(PRODUCERS_DB_KEY, JSON.stringify(existingProducers));
 
+      void dbSyncService.syncProducer(validData);
+
       setUser(newProducer);
       setShowWelcomeNotice(true);
       sessionStorage.setItem(WELCOME_KEY, 'true');
@@ -173,6 +176,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Persistir no banco de revendas
       existingResellers.push(newReseller);
       localStorage.setItem(RESELLERS_DB_KEY, JSON.stringify(existingResellers));
+
+      void dbSyncService.syncReseller(validData);
 
       // Ativar sessão do usuário
       setUser(newReseller);
@@ -461,6 +466,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      void dbSyncService.syncPasswordReset({
+        identifier: cleanInput,
+        token,
+        code,
+        channel: channel === 'whatsapp' ? 'WHATSAPP' : 'EMAIL',
+        expiresAt,
+      });
+
       return {
         success: true,
         message: genericMessage,
@@ -584,6 +597,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Marca token como utilizado
       match.used = true;
       localStorage.setItem(RESETS_DB_KEY, JSON.stringify(resetList));
+
+      void dbSyncService.markPasswordResetUsed(tokenOrCode);
 
       return {
         success: true,

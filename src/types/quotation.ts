@@ -8,8 +8,10 @@ export interface QuotationItem {
   categoryId?: string;
   categoryName?: string;
   productName: string;
+  activeIngredient?: string;
   quantity: number;
   unit: string;
+  acceptsGeneric?: boolean;
 }
 
 export interface QuotationRequest {
@@ -58,6 +60,14 @@ export interface ProducerFarm {
   state: SupportedState;
 }
 
+export interface RecipeAttachment {
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+  dataUrl?: string;
+}
+
 export interface QuotationDraft {
   farmId?: string;
   farmName?: string;
@@ -66,6 +76,7 @@ export interface QuotationDraft {
   targetCrop?: TargetCropId;
   targetCropName?: string;
   items?: QuotationItem[];
+  prescription?: RecipeAttachment;
   title?: string;
   notes?: string;
   updatedAt?: string;

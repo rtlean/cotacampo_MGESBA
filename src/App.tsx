@@ -7,6 +7,7 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { ProducerDashboard } from './pages/ProducerDashboard';
 import { ResellerDashboard } from './pages/ResellerDashboard';
+import { NewQuotationPage } from './pages/NewQuotationPage';
 import { supabase } from './services/supabase';
 
 export const App: React.FC = () => {
@@ -58,6 +59,7 @@ export const App: React.FC = () => {
           <Route path="/recuperar-senha" component={ForgotPasswordPage} />
           <Route path="/redefinir-senha" component={ResetPasswordPage} />
           <Route path="/produtor/dashboard" component={ProducerDashboard} />
+          <Route path="/produtor/cotacoes/nova" component={NewQuotationPage} />
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
           <Route>
             <Redirect to="/cadastro" />

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { CROPS } from '../data/crops';
 import { WelcomeModal } from '../components/WelcomeModal';
@@ -10,14 +10,60 @@ import {
   Phone,
   PlusCircle,
   FileSpreadsheet,
-  Store,
-  TrendingDown,
   Clock,
   Sparkles,
+  CheckCircle2,
+  TrendingUp,
+  Calendar,
+  Layers,
+  ArrowRight,
 } from 'lucide-react';
+import { quotationService } from '../services/quotation.service';
+import { QuotationMetrics, QuotationRequest, QuotationStatus } from '../types/quotation';
 
 export const ProducerDashboard: React.FC = () => {
   const { user, showWelcomeNotice, dismissWelcomeNotice } = useAuth();
+  const [metrics, setMetrics] = useState<QuotationMetrics>(() =>
+    user && user.role === 'PRODUCER'
+      ? quotationService.getLocalMetrics(user.id)
+      : { openCount: 0, inReviewCount: 0, awardedCount: 0, totalCount: 0 }
+  );
+  const [quotations, setQuotations] = useState<QuotationRequest[]>(() =>
+    user && user.role === 'PRODUCER' ? quotationService.getLocalQuotations(user.id) : []
+  );
+  const [activeTab, setActiveTab] = useState<'ALL' | QuotationStatus>('ALL');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (user && user.role === 'PRODUCER') {
+      setMetrics(quotationService.getLocalMetrics(user.id));
+      setQuotations(quotationService.getLocalQuotations(user.id));
+    }
+
+    async function loadData() {
+      if (!user || user.role !== 'PRODUCER') return;
+      try {
+        const [userMetrics, userQuotes] = await Promise.all([
+          quotationService.getProducerMetrics(user.id),
+          quotationService.getProducerQuotations(user.id),
+        ]);
+
+        if (isMounted) {
+          setMetrics(userMetrics);
+          setQuotations(userQuotes);
+        }
+      } catch (err) {
+        console.error('Erro ao carregar dados do dashboard do produtor:', err);
+      }
+    }
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   // If accessed directly without user, fallback display or redirect
   if (!user || user.role !== 'PRODUCER') {
@@ -44,20 +90,51 @@ export const ProducerDashboard: React.FC = () => {
 
   const userCropDetails = CROPS.filter((c) => user.crops.includes(c.id));
 
-  const handleCreateQuote = () => {
-    alert(
-      'A funcionalidade de criação e publicação de cotações de insumos será entregue na User Story 02 (US02).'
-    );
+  const filteredQuotations =
+    activeTab === 'ALL'
+      ? quotations
+      : quotations.filter((q) => q.status === activeTab);
+
+  const getStatusBadge = (status: QuotationStatus) => {
+    switch (status) {
+      case 'OPEN':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+            Aberta
+          </span>
+        );
+      case 'IN_REVIEW':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+            <Clock className="w-3 h-3 text-amber-600" />
+            Aguardando Decisão
+          </span>
+        );
+      case 'AWARDED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+            <CheckCircle2 className="w-3 h-3 text-blue-600" />
+            Concluída
+          </span>
+        );
+      case 'CANCELLED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+            Cancelada
+          </span>
+        );
+    }
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] py-8 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-sand-50 via-agro-50/10 to-sand-50">
+    <div className="min-h-[calc(100vh-4rem)] py-8 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-sand-50 via-agro-50/10 to-sand-50 relative pb-24">
       {/* Welcome Guidance Modal triggered right after registration */}
       <WelcomeModal
         isOpen={showWelcomeNotice}
         onClose={dismissWelcomeNotice}
         user={user}
-        onCreateQuote={handleCreateQuote}
+        onCreateQuote={() => {}}
       />
 
       <div className="max-w-7xl mx-auto space-y-8">
@@ -84,13 +161,12 @@ export const ProducerDashboard: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3 w-full md:w-auto shrink-0">
-              <button
-                type="button"
-                onClick={handleCreateQuote}
-                className="w-full md:w-auto px-4 py-2 rounded-lg bg-agro-500 hover:bg-agro-400 text-agro-950 font-semibold text-xs transition-colors shadow-sm"
+              <Link
+                href="/produtor/cotacoes/nova"
+                className="w-full md:w-auto px-4 py-2 rounded-lg bg-agro-500 hover:bg-agro-400 text-agro-950 font-semibold text-xs transition-colors shadow-sm text-center inline-block"
               >
                 Criar 1ª Cotação
-              </button>
+              </Link>
               <button
                 type="button"
                 onClick={dismissWelcomeNotice}
@@ -102,7 +178,7 @@ export const ProducerDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Top Farm Identity Card */}
+        {/* Top Farm Identity Card with Prominent Quick Action Button */}
         <div className="bg-white rounded-2xl shadow-soft border border-agro-100 p-6 sm:p-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-start gap-4">
@@ -134,16 +210,15 @@ export const ProducerDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Quick Action Button */}
+            {/* Banner Quick Action Button */}
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleCreateQuote}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-sm font-semibold shadow-md shadow-agro-900/10 hover:shadow-lg transition-all cursor-pointer"
+              <Link
+                href="/produtor/cotacoes/nova"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-sm font-semibold shadow-md shadow-agro-900/15 hover:shadow-lg transition-all"
               >
-                <PlusCircle className="w-4 h-4 text-agro-300" />
-                <span>Nova Cotação de Insumos</span>
-              </button>
+                <PlusCircle className="w-4 h-4 text-agro-200" />
+                <span>+ Nova Cotação</span>
+              </Link>
             </div>
           </div>
 
@@ -167,69 +242,247 @@ export const ProducerDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Metrics Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-soft">
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider">Cotações Abertas</span>
-              <FileSpreadsheet className="w-4 h-4 text-agro-600" />
+        {/* 3 Metric Cards: Cotações Abertas, Aguardando Decisão, Concluídas */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          {/* Card 1: Cotações Abertas (OPEN) */}
+          <div className="bg-white p-6 rounded-2xl border border-emerald-100/80 shadow-soft hover:shadow-md transition-shadow relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+            <div className="relative">
+              <div className="flex items-center justify-between text-slate-600 mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                  Cotações Abertas
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+              </div>
+              <div
+                data-testid="card-open-count"
+                className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight"
+              >
+                {metrics.openCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Recebendo lances de revendas</span>
+              </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">0</div>
-            <div className="text-xs text-slate-500 mt-1">Aguardando seu primeiro pedido</div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-soft">
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider">Propostas Recebidas</span>
-              <Clock className="w-4 h-4 text-harvest-600" />
+          {/* Card 2: Aguardando Decisão (IN_REVIEW) */}
+          <div className="bg-white p-6 rounded-2xl border border-amber-100/80 shadow-soft hover:shadow-md transition-shadow relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-amber-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+            <div className="relative">
+              <div className="flex items-center justify-between text-slate-600 mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                  Aguardando Decisão
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                  <Clock className="w-5 h-5" />
+                </div>
+              </div>
+              <div
+                data-testid="card-in-review-count"
+                className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight"
+              >
+                {metrics.inReviewCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+                <span>Prazo encerrado, escolha o vencedor</span>
+              </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">0</div>
-            <div className="text-xs text-slate-500 mt-1">Orçamentos enviados por revendas</div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-soft">
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider">Revendas na Região</span>
-              <Store className="w-4 h-4 text-blue-600" />
+          {/* Card 3: Concluídas (AWARDED) */}
+          <div className="bg-white p-6 rounded-2xl border border-blue-100/80 shadow-soft hover:shadow-md transition-shadow relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+            <div className="relative">
+              <div className="flex items-center justify-between text-slate-600 mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-800">
+                  Concluídas
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+              </div>
+              <div
+                data-testid="card-awarded-count"
+                className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight"
+              >
+                {metrics.awardedCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+                <span>Negociações finalizadas com sucesso</span>
+              </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">
-              {user.state === 'ES' ? '34' : user.state === 'MG' ? '52' : '41'}
-            </div>
-            <div className="text-xs text-slate-500 mt-1">Atendendo {user.city} e região</div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-soft">
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider">Economia Média</span>
-              <TrendingDown className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="text-2xl font-bold text-emerald-700">14% a 22%</div>
-            <div className="text-xs text-slate-500 mt-1">Estimada via leilão reverso</div>
           </div>
         </div>
 
-        {/* Empty State / Next Steps */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-soft p-8 text-center">
-          <div className="max-w-md mx-auto">
-            <div className="w-16 h-16 rounded-full bg-agro-50 border border-agro-200 text-agro-700 flex items-center justify-center mx-auto mb-4">
-              <FileSpreadsheet className="w-8 h-8" />
+        {/* Content Area: Active Quotations List OR Empty State (Cenário 1 vs Cenário 2) */}
+        {quotations.length === 0 ? (
+          /* Cenário 2: Estado Vazio */
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-soft p-8 sm:p-12 text-center">
+            <div className="max-w-md mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-agro-50 border border-agro-200 text-agro-700 flex items-center justify-center mx-auto mb-4 shadow-sm">
+                <FileSpreadsheet className="w-8 h-8" />
+              </div>
+              <h3 className="font-serif text-xl sm:text-2xl font-bold text-slate-900 mb-2">
+                Você ainda não possui cotações ativas
+              </h3>
+              <p className="text-sm text-slate-600 mb-8 leading-relaxed">
+                Publique os insumos necessários para sua lavoura de{' '}
+                <span className="font-semibold text-slate-800">
+                  {userCropDetails.map((c) => c.name).join(', ')}
+                </span>{' '}
+                e receba propostas competitivas das revendas homologadas de {user.state}.
+              </p>
+              <Link
+                href="/produtor/cotacoes/nova"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-agro-700 hover:bg-agro-800 text-white font-semibold text-sm shadow-md shadow-agro-900/15 hover:shadow-lg transition-all"
+              >
+                <PlusCircle className="w-5 h-5" />
+                <span>Iniciar Minha Primeira Cotação</span>
+              </Link>
             </div>
-            <h3 className="font-serif text-xl font-bold text-slate-900 mb-2">
-              Você ainda não possui pedidos de cotação ativos
-            </h3>
-            <p className="text-sm text-slate-600 mb-6">
-              Publique os insumos necessários para sua lavoura de {userCropDetails.map((c) => c.name).join(', ')} e deixe que as revendas parceiras de {user.state} disputem o melhor preço e prazo para você.
-            </p>
-            <button
-              type="button"
-              onClick={handleCreateQuote}
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-agro-700 hover:bg-agro-800 text-white font-semibold text-sm shadow-md shadow-agro-900/10 transition-colors"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Publicar Minha Primeira Cotação</span>
-            </button>
           </div>
-        </div>
+        ) : (
+          /* Cenário 1: Lista e Gestão de Cotações */
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-soft overflow-hidden">
+            {/* Header & Tabs */}
+            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-lg font-bold text-slate-900">
+                  Minhas Demandas de Cotação
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Acompanhe os lances e prazos das suas solicitações
+                </p>
+              </div>
+
+              {/* Status Tabs */}
+              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs font-medium text-slate-600 overflow-x-auto">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ALL')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    activeTab === 'ALL'
+                      ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                      : 'hover:text-slate-900'
+                  }`}
+                >
+                  Todas ({quotations.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('OPEN')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    activeTab === 'OPEN'
+                      ? 'bg-white text-emerald-800 font-semibold shadow-xs'
+                      : 'hover:text-slate-900'
+                  }`}
+                >
+                  Abertas ({metrics.openCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('IN_REVIEW')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    activeTab === 'IN_REVIEW'
+                      ? 'bg-white text-amber-800 font-semibold shadow-xs'
+                      : 'hover:text-slate-900'
+                  }`}
+                >
+                  Em Decisão ({metrics.inReviewCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('AWARDED')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    activeTab === 'AWARDED'
+                      ? 'bg-white text-blue-800 font-semibold shadow-xs'
+                      : 'hover:text-slate-900'
+                  }`}
+                >
+                  Concluídas ({metrics.awardedCount})
+                </button>
+              </div>
+            </div>
+
+            {/* List / Table */}
+            <div className="divide-y divide-slate-100">
+              {filteredQuotations.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  Nenhuma cotação encontrada com o status selecionado.
+                </div>
+              ) : (
+                filteredQuotations.map((quote) => (
+                  <div
+                    key={quote.id}
+                    className="p-5 sm:p-6 hover:bg-slate-50/70 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getStatusBadge(quote.status)}
+                        <span className="text-xs text-slate-400">
+                          ID: #{quote.id.slice(0, 8)}
+                        </span>
+                        <span className="text-xs text-slate-300">•</span>
+                        <span className="text-xs text-slate-500 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                          {quote.targetCity}/{quote.targetState}
+                        </span>
+                      </div>
+
+                      <h3 className="text-base font-bold text-slate-900 hover:text-agro-800 transition-colors">
+                        {quote.title}
+                      </h3>
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5 text-slate-400" />
+                          {quote.itemsCount || 1} {quote.itemsCount === 1 ? 'item' : 'itens'}
+                        </span>
+                        <span className="text-slate-300">•</span>
+                        <span className="flex items-center gap-1 font-medium text-agro-800">
+                          <TrendingUp className="w-3.5 h-3.5 text-agro-600" />
+                          {quote.bidsCount || 0} {quote.bidsCount === 1 ? 'lance recebido' : 'lances recebidos'}
+                        </span>
+                        <span className="text-slate-300">•</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          Prazo: {new Date(quote.deadline).toLocaleDateString('pt-BR')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link
+                        href={`/produtor/cotacoes/${quote.id}`}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                      >
+                        <span>Ver Detalhes</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Floating Action Button (FAB): [+ Nova Cotação] (Mobile & Desktop accessibility) */}
+      <div className="fixed bottom-6 right-6 z-30">
+        <Link
+          href="/produtor/cotacoes/nova"
+          className="flex items-center gap-2 px-5 py-3.5 rounded-full bg-agro-700 hover:bg-agro-800 text-white font-semibold text-sm shadow-xl shadow-agro-900/30 hover:scale-105 transition-all border border-agro-600 cursor-pointer"
+        >
+          <PlusCircle className="w-5 h-5 text-harvest-400" />
+          <span>+ Nova Cotação</span>
+        </Link>
       </div>
     </div>
   );

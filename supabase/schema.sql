@@ -128,7 +128,7 @@ CREATE TABLE quotation_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     producer_id UUID NOT NULL REFERENCES producers(id) ON DELETE RESTRICT,
     title VARCHAR(255) NOT NULL,
-    status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED', 'CANCELLED')),
+    status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'IN_REVIEW', 'AWARDED', 'CANCELLED', 'CLOSED')),
     target_state CHAR(2) NOT NULL CHECK (target_state IN ('MG', 'ES', 'BA')),
     target_city VARCHAR(100) NOT NULL,
     deadline TIMESTAMPTZ NOT NULL,

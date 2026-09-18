@@ -16,7 +16,7 @@ import { producerRegistrationSchema } from '../schemas/producer.schema';
 import { resellerRegistrationSchema } from '../schemas/reseller.schema';
 import { getCityCoordinates } from '../data/locations';
 import { dbSyncService } from '../services/db-sync.service';
-import { supabase } from '../services/supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../services/supabase';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -458,11 +458,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             } else {
               // Fallback via endpoint REST com redirect_to explícito
               const resp = await fetch(
-                `https://uwrvxmlgvgvvqmtucidk.supabase.co/auth/v1/recover?redirect_to=${encodeURIComponent(`${baseUrl}/redefinir-senha`)}`,
+                `${supabaseUrl}/auth/v1/recover?redirect_to=${encodeURIComponent(`${baseUrl}/redefinir-senha`)}`,
                 {
                   method: 'POST',
                   headers: {
-                    apikey: 'sb_publishable_y5aPNNUO7xqZj8-m6lPsuQ_4trcol-t',
+                    apikey: supabaseAnonKey,
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({

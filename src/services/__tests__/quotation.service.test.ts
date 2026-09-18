@@ -380,5 +380,173 @@ describe('Quotation Service', () => {
       expect(farms[0].state).toBe('ES');
     });
   });
+
+  describe('US08 – Publicação, Notificações e Flash Messages', () => {
+    it('deve gerenciar mensagens flash de redirecionamento', () => {
+      expect(quotationService.getFlashMessage()).toBeNull();
+
+      quotationService.setFlashMessage('Cotação #COT-001 publicada com sucesso!');
+      expect(quotationService.getFlashMessage()).toBe('Cotação #COT-001 publicada com sucesso!');
+
+      quotationService.clearFlashMessage();
+      expect(quotationService.getFlashMessage()).toBeNull();
+    });
+
+    it('deve publicar uma cotação no status OPEN, disparar notificação às revendas e limpar o rascunho', async () => {
+      const mockProducer = {
+        id: producerId,
+        name: 'Carlos Produtor',
+        email: 'carlos@fazenda.com',
+        whatsapp: '27999887766',
+        role: 'PRODUCER' as const,
+        farmName: 'Fazenda Santa Clara',
+        state: 'ES' as const,
+        city: 'Linhares',
+        crops: ['cafe' as const],
+        createdAt: new Date().toISOString(),
+      };
+
+      const mockDraft = {
+        farmId: 'farm-1',
+        farmName: 'Fazenda Santa Clara',
+        targetCity: 'Linhares',
+        targetState: 'ES' as const,
+        targetCrop: 'cafe_conilon' as const,
+        targetCropName: 'Café Conilon',
+        items: [
+          {
+            productName: 'Mancozeb 750 WG',
+            quantity: 50,
+            unit: 'Kg',
+            acceptsGeneric: true,
+          },
+        ],
+      };
+
+      // Salva rascunho inicial
+      quotationService.saveDraft(mockDraft);
+      expect(quotationService.getDraft()).not.toBeNull();
+
+      const commercial = {
+        freightType: 'CIF' as const,
+        paymentTerms: '30/60 dias',
+        proposalLimitHours: 48,
+        notes: 'Entregar no galpão 1',
+      };
+
+      const published = await quotationService.publishQuotation({
+        draft: mockDraft,
+        user: mockProducer,
+        commercial,
+      });
+
+      // Validações do resultado
+      expect(published.status).toBe('OPEN');
+      expect(published.producerId).toBe(producerId);
+      expect(published.freightType).toBe('CIF');
+      expect(published.paymentTerms).toBe('30/60 dias');
+      expect(published.proposalLimitHours).toBe(48);
+      expect(published.items?.length).toBe(1);
+      expect(published.displayCode).toBe('COT-001');
+
+      // O rascunho deve ter sido limpo
+      expect(quotationService.getDraft()).toBeNull();
+
+      // A mensagem flash deve estar disponível
+      expect(quotationService.getFlashMessage()).toBe('Cotação #COT-001 publicada com sucesso!');
+
+      // A lista de notificações deve conter o aviso para as revendas parceiras
+      const notifications = quotationService.getNotifications();
+      expect(notifications.length).toBeGreaterThan(0);
+      expect(notifications[0].quotationId).toBe(published.id);
+      expect(notifications[0].targetCity).toBe('Linhares');
+      expect(notifications[0].message).toContain('Nova cotação #COT-001 aberta');
+    });
+
+    it('deve usar valores padrão quando campos opcionais do rascunho não forem definidos', async () => {
+      const mockProducer = {
+        id: 'prod-fallback',
+        name: 'Joaquim',
+        email: 'joaquim@fazenda.com',
+        whatsapp: '27999881122',
+        role: 'PRODUCER' as const,
+        farmName: 'Sítio Recanto',
+        state: 'ES' as const,
+        city: 'São Mateus',
+        crops: ['cacau' as const],
+        createdAt: new Date().toISOString(),
+      };
+
+      const emptyDraft = {};
+      const commercial = {
+        freightType: 'FOB' as const,
+        paymentTerms: 'À vista',
+        proposalLimitHours: 24,
+      };
+
+      const published = await quotationService.publishQuotation({
+        draft: emptyDraft,
+        user: mockProducer,
+        commercial,
+      });
+
+      expect(published.status).toBe('OPEN');
+      expect(published.freightType).toBe('FOB');
+      expect(published.paymentTerms).toBe('À vista');
+      expect(published.proposalLimitHours).toBe(24);
+      expect(published.targetCity).toBe('São Mateus');
+      expect(published.targetState).toBe('ES');
+      expect(published.title).toContain('Insumos para Lavoura');
+    });
+
+    it('deve tratar exceções de armazenamento e falhas no Supabase em notificações e flash messages', async () => {
+      // Falha no sessionStorage
+      const sessionSetSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new Error('Session storage blocked');
+      });
+      quotationService.setFlashMessage('Teste');
+      sessionSetSpy.mockRestore();
+
+      const sessionGetSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementationOnce(() => {
+        throw new Error('Session storage error');
+      });
+      expect(quotationService.getFlashMessage()).toBeNull();
+      sessionGetSpy.mockRestore();
+
+      // Corrupção em notificações
+      localStorage.setItem('cotacampo_quotation_notifications', 'invalid-json{');
+      expect(quotationService.getNotifications()).toEqual([]);
+
+      // Falha ao salvar notificação localmente
+      const localSetSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new Error('Storage full');
+      });
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Falha no insert do Supabase
+      vi.spyOn(supabase, 'from').mockReturnValueOnce({
+        insert: vi.fn().mockRejectedValueOnce(new Error('Supabase insert failed')),
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const fakeQuote: QuotationRequest = {
+        id: 'q-notif-err',
+        producerId: 'p-1',
+        title: 'Cotação',
+        status: 'OPEN',
+        targetState: 'ES',
+        targetCity: 'Linhares',
+        deadline: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = await quotationService.notifyResellers(fakeQuote);
+      expect(result.length).toBe(1);
+
+      localSetSpy.mockRestore();
+      consoleSpy.mockRestore();
+    });
+  });
 });
+
 

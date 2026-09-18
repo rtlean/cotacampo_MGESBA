@@ -1,9 +1,12 @@
-import { ProducerFarm, QuotationDraft, QuotationMetrics, QuotationRequest } from '../types/quotation';
+import { ProducerFarm, QuotationDraft, QuotationMetrics, QuotationNotification, QuotationRequest } from '../types/quotation';
 import { ProducerProfile } from '../types/user';
+import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 const LOCAL_STORAGE_KEY = 'cotacampo_quotations';
 const DRAFT_STORAGE_KEY = 'cotacampo_quotation_draft';
+const FLASH_MESSAGE_KEY = 'cotacampo_flash_message';
+const NOTIFICATIONS_STORAGE_KEY = 'cotacampo_quotation_notifications';
 
 export const quotationService = {
   /**
@@ -240,5 +243,155 @@ export const quotationService = {
         console.warn('Aviso ao sincronizar cotação com Supabase:', err);
       }
     }
+  },
+
+  /**
+   * Salva mensagem flash para exibição imediata após redirecionamento
+   */
+  setFlashMessage(message: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.setItem(FLASH_MESSAGE_KEY, message);
+    } catch {
+      // Ignorar se não suportado
+    }
+  },
+
+  /**
+   * Recupera a mensagem flash pendente
+   */
+  getFlashMessage(): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      return sessionStorage.getItem(FLASH_MESSAGE_KEY);
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Remove a mensagem flash
+   */
+  clearFlashMessage(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.removeItem(FLASH_MESSAGE_KEY);
+    } catch {
+      // Ignorar
+    }
+  },
+
+  /**
+   * Recupera a lista de notificações enviadas às revendas
+   */
+  getNotifications(): QuotationNotification[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Dispara notificação para as revendas que atendem o raio de entrega do município
+   */
+  async notifyResellers(quote: QuotationRequest): Promise<QuotationNotification[]> {
+    const notification: QuotationNotification = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `notif_${Date.now()}`,
+      quotationId: quote.id,
+      quotationCode: quote.displayCode,
+      targetCity: quote.targetCity,
+      targetState: quote.targetState,
+      message: `Nova cotação #${quote.displayCode || quote.id} aberta para entrega em ${quote.targetCity}/${quote.targetState} (${quote.freightType === 'CIF' ? 'CIF - Entregue na propriedade' : 'FOB - Retirada na revenda'}). Prazo para lances: ${quote.proposalLimitHours || 48}h.`,
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+        const list: QuotationNotification[] = stored ? JSON.parse(stored) : [];
+        list.unshift(notification);
+        localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.error('Erro ao salvar notificação localmente:', e);
+      }
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('quotation_notifications').insert({
+          id: notification.id,
+          quotation_id: notification.quotationId,
+          target_city: notification.targetCity,
+          target_state: notification.targetState,
+          message: notification.message,
+        });
+      } catch {
+        // Tabela opcional ou em migração
+      }
+    }
+
+    return [notification];
+  },
+
+  /**
+   * Publica uma cotação no status OPEN, calculando prazos, disparando notificações e limpando rascunho
+   */
+  async publishQuotation(params: {
+    draft: QuotationDraft;
+    user: ProducerProfile;
+    commercial: Step3CommercialSchema;
+  }): Promise<QuotationRequest> {
+    const { draft, user, commercial } = params;
+
+    const existingQuotes = this.getLocalQuotations(user.id);
+    const codeNumber = existingQuotes.length + 1;
+    const displayCode = `COT-${codeNumber.toString().padStart(3, '0')}`;
+
+    const limitHours = commercial.proposalLimitHours || 48;
+    const deadlineDate = new Date(Date.now() + limitHours * 3600 * 1000).toISOString();
+
+    const title =
+      draft.title ||
+      `Insumos para ${draft.targetCropName || 'Lavoura'} - ${draft.farmName || user.farmName || 'Fazenda'}`;
+
+    const quoteId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `quote_${Date.now()}`;
+
+    const newQuotation: QuotationRequest = {
+      id: quoteId,
+      producerId: user.id,
+      title,
+      status: 'OPEN',
+      targetState: draft.targetState || user.state || 'ES',
+      targetCity: draft.targetCity || user.city || 'Linhares',
+      deadline: deadlineDate,
+      freightType: commercial.freightType,
+      paymentTerms: commercial.paymentTerms,
+      proposalLimitHours: limitHours,
+      displayCode,
+      notes: commercial.notes || draft.notes,
+      items: draft.items || [],
+      itemsCount: draft.items?.length || 0,
+      bidsCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. Salva a cotação no cache e no banco com status OPEN
+    await this.saveQuotation(newQuotation);
+
+    // 2. Dispara a notificação para as revendas parceiras do raio do município
+    await this.notifyResellers(newQuotation);
+
+    // 3. Limpa o rascunho temporário do wizard
+    this.clearDraft();
+
+    // 4. Grava a mensagem flash para o dashboard
+    this.setFlashMessage(`Cotação #${displayCode} publicada com sucesso!`);
+
+    return newQuotation;
   },
 };

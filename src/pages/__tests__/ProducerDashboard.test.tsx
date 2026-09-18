@@ -283,4 +283,23 @@ describe('US05 – Dashboard e Gestão de Cotações do Produtor', () => {
 
     errorSpy.mockRestore();
   });
+
+  it('US08: deve exibir banner de confirmação quando houver mensagem flash de cotação publicada e permitir dispensá-la', async () => {
+    sessionStorage.setItem('cotacampo_flash_message', 'Cotação #COT-001 publicada com sucesso!');
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByText('Cotação #COT-001 publicada com sucesso!')).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: /Fechar aviso de cotação publicada/i });
+    fireEvent.click(closeBtn);
+
+    expect(screen.queryByText('Cotação #COT-001 publicada com sucesso!')).not.toBeInTheDocument();
+  });
 });
+

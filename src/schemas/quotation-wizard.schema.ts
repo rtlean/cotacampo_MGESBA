@@ -71,3 +71,22 @@ export const step2QuotationSchema = z.object({
 
 export type Step2QuotationSchema = z.infer<typeof step2QuotationSchema>;
 
+export const FREIGHT_OPTIONS = ['CIF', 'FOB'] as const;
+
+export const step3CommercialSchema = z.object({
+  freightType: z.enum(FREIGHT_OPTIONS, {
+    message: 'Selecione a modalidade de frete',
+  }),
+  paymentTerms: z
+    .string({ message: 'Selecione a condição de pagamento' })
+    .trim()
+    .min(1, 'Selecione a condição de pagamento'),
+  proposalLimitHours: z
+    .number({ message: 'Selecione o prazo limite para propostas' })
+    .positive('Selecione o prazo limite para propostas')
+    .default(48),
+  notes: z.string().optional(),
+});
+
+export type Step3CommercialSchema = z.infer<typeof step3CommercialSchema>;
+

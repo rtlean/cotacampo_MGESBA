@@ -132,6 +132,9 @@ CREATE TABLE quotation_requests (
     target_state CHAR(2) NOT NULL CHECK (target_state IN ('MG', 'ES', 'BA')),
     target_city VARCHAR(100) NOT NULL,
     deadline TIMESTAMPTZ NOT NULL,
+    freight_type VARCHAR(50) DEFAULT 'CIF',
+    payment_terms VARCHAR(100) DEFAULT '30/60 dias',
+    proposal_limit_hours INTEGER DEFAULT 48,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
@@ -140,10 +143,12 @@ CREATE TABLE quotation_requests (
 CREATE TABLE quotation_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     quotation_id UUID NOT NULL REFERENCES quotation_requests(id) ON DELETE CASCADE,
-    category_id UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    category_id UUID REFERENCES categories(id) ON DELETE RESTRICT,
     product_name VARCHAR(255) NOT NULL,
+    active_ingredient VARCHAR(255),
     quantity NUMERIC(12, 2) NOT NULL CHECK (quantity > 0),
     unit VARCHAR(20) NOT NULL,
+    accepts_generic BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -158,6 +163,18 @@ CREATE TABLE quotation_bids (
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (quotation_id, reseller_id)
+);
+
+CREATE TABLE quotation_notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    quotation_id UUID NOT NULL REFERENCES quotation_requests(id) ON DELETE CASCADE,
+    reseller_id UUID REFERENCES resellers(id) ON DELETE CASCADE,
+    target_city VARCHAR(100) NOT NULL,
+    target_state CHAR(2) NOT NULL,
+    channel VARCHAR(30) DEFAULT 'IN_APP',
+    message TEXT NOT NULL,
+    read BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- 11. POLÍTICAS DE SEGURANÇA ROW LEVEL SECURITY (RLS)
@@ -244,3 +261,11 @@ CREATE POLICY "Leitura de lances da cotacao" ON quotation_bids FOR SELECT USING 
 
 DROP POLICY IF EXISTS "Insercao de lances da cotacao" ON quotation_bids;
 CREATE POLICY "Insercao de lances da cotacao" ON quotation_bids FOR INSERT WITH CHECK (true);
+
+-- Políticas para Notificações de Cotações
+ALTER TABLE quotation_notifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Leitura de notificacoes" ON quotation_notifications;
+CREATE POLICY "Leitura de notificacoes" ON quotation_notifications FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Insercao de notificacoes" ON quotation_notifications;
+CREATE POLICY "Insercao de notificacoes" ON quotation_notifications FOR INSERT WITH CHECK (true);

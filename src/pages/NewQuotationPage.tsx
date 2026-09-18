@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import {
   ArrowLeft,
   Building,
@@ -17,6 +17,8 @@ import {
   FileCheck,
   DollarSign,
   ShieldCheck,
+  Truck,
+  Clock,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -25,14 +27,16 @@ import { searchCatalogProducts, CatalogProduct } from '../data/products';
 import { quotationService } from '../services/quotation.service';
 import {
   step1DestinationSchema,
+  step3CommercialSchema,
   MAX_PRESCRIPTION_SIZE_BYTES,
   ALLOWED_PRESCRIPTION_TYPES,
 } from '../schemas/quotation-wizard.schema';
-import { ProducerFarm, TargetCropId, QuotationItem, RecipeAttachment } from '../types/quotation';
+import { ProducerFarm, TargetCropId, QuotationItem, RecipeAttachment, FreightType, QuotationDraft } from '../types/quotation';
 import { ProducerProfile } from '../types/user';
 
 export const NewQuotationPage: React.FC = () => {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const producerUser = user?.role === 'PRODUCER' ? (user as ProducerProfile) : null;
 
   // Wizard Step State (1: Destino e Cultura, 2: Itens, 3: Condições Comerciais)
@@ -59,6 +63,19 @@ export const NewQuotationPage: React.FC = () => {
   const [prescription, setPrescription] = useState<RecipeAttachment | null>(null);
   const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
 
+  // Step 3 Form State (Condições Comerciais e Publicação)
+  const [freightType, setFreightType] = useState<FreightType | ''>('');
+  const [paymentTerms, setPaymentTerms] = useState<string>('');
+  const [proposalLimitHours, setProposalLimitHours] = useState<number>(48);
+  const [commercialNotes, setCommercialNotes] = useState<string>('');
+  const [step3Errors, setStep3Errors] = useState<{
+    freightType?: string;
+    paymentTerms?: string;
+    proposalLimitHours?: string;
+  }>({});
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
   // Inicialização de fazendas e recuperação de rascunho
   useEffect(() => {
     const loadedFarms = quotationService.getProducerFarms(producerUser);
@@ -70,6 +87,10 @@ export const NewQuotationPage: React.FC = () => {
       if (draft.targetCrop) setSelectedCrop(draft.targetCrop);
       if (draft.items && draft.items.length > 0) setItems(draft.items);
       if (draft.prescription) setPrescription(draft.prescription);
+      if (draft.freightType) setFreightType(draft.freightType);
+      if (draft.paymentTerms) setPaymentTerms(draft.paymentTerms);
+      if (draft.proposalLimitHours) setProposalLimitHours(draft.proposalLimitHours);
+      if (draft.notes) setCommercialNotes(draft.notes);
     } else if (loadedFarms.length === 1 && !selectedFarmId) {
       setSelectedFarmId(loadedFarms[0].id);
     }
@@ -297,6 +318,76 @@ export const NewQuotationPage: React.FC = () => {
     });
 
     setCurrentStep(3);
+  };
+
+  // Handler para publicação da cotação (Passo 3 - US08)
+  const handlePublishQuotation = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!producerUser) {
+      setPublishError('Usuário produtor não autenticado.');
+      return;
+    }
+
+    const validation = step3CommercialSchema.safeParse({
+      freightType: freightType || undefined,
+      paymentTerms: paymentTerms || undefined,
+      proposalLimitHours,
+      notes: commercialNotes,
+    });
+
+    if (!validation.success) {
+      const fieldErrors: {
+        freightType?: string;
+        paymentTerms?: string;
+        proposalLimitHours?: string;
+      } = {};
+      for (const issue of validation.error.issues) {
+        const fieldName = issue.path[0] as 'freightType' | 'paymentTerms' | 'proposalLimitHours';
+        if (!fieldErrors[fieldName]) {
+          fieldErrors[fieldName] = issue.message;
+        }
+      }
+      setStep3Errors(fieldErrors);
+      setPublishError('Por favor, preencha todos os campos obrigatórios em destaque.');
+      return;
+    }
+
+    setStep3Errors({});
+    setPublishError(null);
+    setIsPublishing(true);
+
+    try {
+      const currentDraft = quotationService.getDraft() || {};
+      const consolidatedDraft: QuotationDraft = {
+        ...currentDraft,
+        farmId: selectedFarmId,
+        farmName: selectedFarmObj?.name,
+        targetCity: selectedFarmObj?.city,
+        targetState: selectedFarmObj?.state,
+        targetCrop: selectedCrop as TargetCropId,
+        targetCropName: selectedCropObj?.name,
+        items,
+        prescription: prescription || undefined,
+        freightType: validation.data.freightType,
+        paymentTerms: validation.data.paymentTerms,
+        proposalLimitHours: validation.data.proposalLimitHours,
+        notes: commercialNotes || undefined,
+      };
+
+      await quotationService.publishQuotation({
+        draft: consolidatedDraft,
+        user: producerUser,
+        commercial: validation.data,
+      });
+
+      // Redireciona para o dashboard com a mensagem de sucesso
+      setLocation('/produtor/dashboard');
+    } catch (err) {
+      console.error('Erro ao publicar cotação:', err);
+      setPublishError('Ocorreu um erro ao publicar a cotação. Tente novamente.');
+      setIsPublishing(false);
+    }
   };
 
   const selectedFarmObj = farms.find((f) => f.id === selectedFarmId);
@@ -942,58 +1033,311 @@ export const NewQuotationPage: React.FC = () => {
           </div>
         )}
 
-        {/* PASSO 3: CONDIÇÕES COMERCIAIS E ENVIO (Prévia) */}
+        {/* PASSO 3: CONDIÇÕES COMERCIAIS E PUBLICAÇÃO (US08) */}
         {currentStep === 3 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="bg-emerald-900/90 text-white rounded-2xl p-6 shadow-soft flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-emerald-300 text-xs font-bold uppercase tracking-wider mb-1">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Passo 2 Concluído • Itens da Demanda Registrados</span>
+          <form onSubmit={handlePublishQuotation} className="space-y-6 animate-fade-in">
+            {/* Header / Resumo */}
+            <div className="bg-white rounded-2xl p-6 shadow-soft border border-agro-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-agro-700 to-agro-900 text-white flex items-center justify-center shadow-md shrink-0">
+                  <DollarSign className="w-6 h-6 text-harvest-400" />
                 </div>
-                <h2 className="text-xl font-bold text-white font-serif">
-                  {items.length} {items.length === 1 ? 'Insumo Cadastrado' : 'Insumos Cadastrados'}
-                </h2>
-                <p className="text-xs text-emerald-100/90 mt-1 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-emerald-300" />
-                  {selectedFarmObj?.name} ({selectedFarmObj?.city}/{selectedFarmObj?.state}) • {selectedCropObj?.name}
-                </p>
+                <div>
+                  <h1 className="font-serif text-2xl font-bold text-slate-900">
+                    Passo 3: Condições Comerciais e Publicação
+                  </h1>
+                  <h3 className="font-serif text-lg font-bold text-slate-800 mt-0.5">
+                    Passo 3: Prazos e Condições Comerciais
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Estipule o frete, condições de pagamento e prazo limite para receber propostas das revendas.
+                  </p>
+                </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setCurrentStep(2)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold border border-white/20 transition-colors self-start md:self-auto"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-300 transition-colors self-start md:self-auto"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Voltar para Itens da Cotação</span>
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-soft p-8 text-center space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-harvest-50 border border-harvest-200 text-harvest-700 flex items-center justify-center mx-auto">
-                <DollarSign className="w-7 h-7" />
+            {/* Resumo Consolidado do Pedido */}
+            <div className="bg-agro-50/60 rounded-2xl border border-agro-200/80 p-5">
+              <div className="flex items-center gap-2 text-agro-800 text-xs font-bold uppercase tracking-wider mb-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Resumo da Demanda</span>
               </div>
-              <h3 className="font-serif text-xl font-bold text-slate-900">
-                Passo 3: Prazos e Condições Comerciais
-              </h3>
-              <p className="text-sm text-slate-600 max-w-lg mx-auto">
-                Seus {items.length} insumos e receituário foram validados. Na próxima etapa você definirá a data limite para
-                envio de propostas pelas revendas parceiras de {selectedFarmObj?.state}.
-              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="bg-white p-3 rounded-xl border border-agro-100">
+                  <p className="text-slate-500 font-medium">Destino de Entrega</p>
+                  <p className="font-bold text-slate-900 truncate">
+                    {selectedFarmObj?.name} ({selectedFarmObj?.city}/{selectedFarmObj?.state})
+                  </p>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-agro-100">
+                  <p className="text-slate-500 font-medium">Cultura Atendida</p>
+                  <p className="font-bold text-slate-900">{selectedCropObj?.name || 'Lavoura'}</p>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-agro-100">
+                  <p className="text-slate-500 font-medium">Itens e Receituário</p>
+                  <p className="font-bold text-slate-900">
+                    {items.length} {items.length === 1 ? 'Insumo Cadastrado' : 'Insumos Cadastrados'} • {prescription ? 'Receituário Anexado' : 'Sem receituário'}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-              <div className="pt-4 flex flex-wrap items-center justify-center gap-4">
+            {/* Formulário Comercial */}
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-200 p-6 sm:p-8 space-y-8">
+              {/* 1. Modalidade de Frete */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-bold text-slate-900">
+                    Modalidade de Frete <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-xs text-slate-500">Selecione uma modalidade</span>
+                </div>
+
+                <div
+                  data-testid="freight-type-selector"
+                  className={`grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl transition-all ${
+                    step3Errors.freightType ? 'p-2 border-2 border-red-500 bg-red-50/20' : ''
+                  }`}
+                >
+                  {/* Opção CIF */}
+                  <label
+                    className={`relative flex items-start gap-4 p-5 rounded-xl border-2 cursor-pointer transition-all ${
+                      freightType === 'CIF'
+                        ? 'border-agro-700 bg-agro-50/70 shadow-sm'
+                        : step3Errors.freightType
+                        ? 'border-red-400 bg-white'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="freightType"
+                      value="CIF"
+                      checked={freightType === 'CIF'}
+                      onChange={() => {
+                        setFreightType('CIF');
+                        if (step3Errors.freightType) setStep3Errors((prev) => ({ ...prev, freightType: undefined }));
+                      }}
+                      className="mt-1 w-4 h-4 text-agro-700 border-slate-300 focus:ring-agro-600 cursor-pointer"
+                    />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Truck className="w-4 h-4 text-agro-700" />
+                        <span className="text-sm font-bold text-slate-900">CIF (Entregue na propriedade)</span>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        O fornecedor se responsabiliza pelo frete, descarga e seguro até a sede da fazenda em {selectedFarmObj?.city || 'sua propriedade'}.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Opção FOB */}
+                  <label
+                    className={`relative flex items-start gap-4 p-5 rounded-xl border-2 cursor-pointer transition-all ${
+                      freightType === 'FOB'
+                        ? 'border-agro-700 bg-agro-50/70 shadow-sm'
+                        : step3Errors.freightType
+                        ? 'border-red-400 bg-white'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="freightType"
+                      value="FOB"
+                      checked={freightType === 'FOB'}
+                      onChange={() => {
+                        setFreightType('FOB');
+                        if (step3Errors.freightType) setStep3Errors((prev) => ({ ...prev, freightType: undefined }));
+                      }}
+                      className="mt-1 w-4 h-4 text-agro-700 border-slate-300 focus:ring-agro-600 cursor-pointer"
+                    />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Building className="w-4 h-4 text-agro-700" />
+                        <span className="text-sm font-bold text-slate-900">FOB (Retirada na revenda)</span>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        O produtor realiza a retirada diretamente no armazém ou loja física da revenda fornecedora.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {step3Errors.freightType && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-2 flex items-center gap-1.5 animate-fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    <span>{step3Errors.freightType}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* 2. Condição de Pagamento */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="payment-terms-select" className="block text-sm font-bold text-slate-900">
+                    Condição de Pagamento <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-xs text-slate-500">Prazos e modalidades aceitos</span>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="relative">
+                    <select
+                      id="payment-terms-select"
+                      name="paymentTerms"
+                      aria-label="Condição de Pagamento"
+                      value={paymentTerms}
+                      onChange={(e) => {
+                        setPaymentTerms(e.target.value);
+                        if (step3Errors.paymentTerms) setStep3Errors((prev) => ({ ...prev, paymentTerms: undefined }));
+                      }}
+                      className={`w-full px-4 py-3 rounded-xl border bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 transition-all ${
+                        step3Errors.paymentTerms
+                          ? 'border-red-500 ring-2 ring-red-200 bg-red-50/30'
+                          : 'border-slate-300 focus:border-agro-600 focus:ring-agro-600/20'
+                      }`}
+                    >
+                      <option value="">Selecione a condição de pagamento...</option>
+                      <option value="30/60 dias">30/60 dias</option>
+                      <option value="30 dias">30 dias direto</option>
+                      <option value="À vista">À vista (PIX / Boleto na entrega)</option>
+                      <option value="Safra / Barter">Safra / Barter</option>
+                    </select>
+                  </div>
+
+                  {/* Atalhos de Botão */}
+                  <div className="flex flex-wrap gap-2">
+                    {['30/60 dias', '30 dias', 'À vista', 'Safra / Barter'].map((term) => (
+                      <button
+                        key={term}
+                        type="button"
+                        onClick={() => {
+                          setPaymentTerms(term);
+                          if (step3Errors.paymentTerms) setStep3Errors((prev) => ({ ...prev, paymentTerms: undefined }));
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                          paymentTerms === term
+                            ? 'bg-agro-700 text-white border-agro-700 shadow-sm'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {term}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {step3Errors.paymentTerms && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-2 flex items-center gap-1.5 animate-fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    <span>{step3Errors.paymentTerms}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* 3. Prazo Limite para Recebimento de Propostas */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-bold text-slate-900">
+                    Prazo Limite para Propostas <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-xs text-slate-500">Tempo aberto para lances das revendas</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: '24 horas', hours: 24 },
+                    { label: '48 horas', hours: 48 },
+                    { label: '72 horas', hours: 72 },
+                    { label: '5 dias', hours: 120 },
+                  ].map((option) => (
+                    <label
+                      key={option.hours}
+                      className={`flex items-center justify-center gap-2 p-3.5 rounded-xl border-2 cursor-pointer text-xs sm:text-sm font-bold transition-all text-center ${
+                        proposalLimitHours === option.hours
+                          ? 'border-agro-700 bg-agro-50 text-agro-900 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="proposalLimitHours"
+                        value={option.hours}
+                        checked={proposalLimitHours === option.hours}
+                        onChange={() => setProposalLimitHours(option.hours)}
+                        className="sr-only"
+                      />
+                      <Clock className={`w-4 h-4 ${proposalLimitHours === option.hours ? 'text-agro-700' : 'text-slate-400'}`} />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Instruções Adicionais (Opcional) */}
+              <div>
+                <label htmlFor="commercial-notes" className="block text-sm font-bold text-slate-900 mb-1">
+                  Instruções Adicionais e Observações <span className="text-xs font-normal text-slate-500">(Opcional)</span>
+                </label>
+                <textarea
+                  id="commercial-notes"
+                  rows={3}
+                  value={commercialNotes}
+                  onChange={(e) => setCommercialNotes(e.target.value)}
+                  placeholder="Ex: Entregar preferencialmente pela manhã. Galpão com acesso fácil para caminhão truck."
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-agro-600 focus:ring-agro-600/20 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 resize-none transition-all"
+                />
+              </div>
+
+              {/* Mensagem Geral de Erro */}
+              {publishError && (
+                <div role="alert" className="p-4 rounded-xl bg-red-50 border border-red-200 flex items-center gap-3 text-red-800 text-sm font-semibold animate-fade-in">
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+                  <span>{publishError}</span>
+                </div>
+              )}
+
+              {/* Botões de Ação */}
+              <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setCurrentStep(2)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-sm transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <span>Voltar para Itens da Cotação</span>
                 </button>
+
+                <button
+                  type="submit"
+                  disabled={isPublishing}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-agro-700 hover:bg-agro-800 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isPublishing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Publicando Cotação...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-harvest-300" />
+                      <span>Publicar Cotação</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
-          </div>
+          </form>
         )}
       </div>
     </div>

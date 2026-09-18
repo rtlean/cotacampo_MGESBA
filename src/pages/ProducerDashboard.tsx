@@ -17,12 +17,16 @@ import {
   Calendar,
   Layers,
   ArrowRight,
+  X,
 } from 'lucide-react';
 import { quotationService } from '../services/quotation.service';
 import { QuotationMetrics, QuotationRequest, QuotationStatus } from '../types/quotation';
 
 export const ProducerDashboard: React.FC = () => {
   const { user, showWelcomeNotice, dismissWelcomeNotice } = useAuth();
+  const [publishedMessage, setPublishedMessage] = useState<string | null>(() =>
+    quotationService.getFlashMessage()
+  );
   const [metrics, setMetrics] = useState<QuotationMetrics>(() =>
     user && user.role === 'PRODUCER'
       ? quotationService.getLocalMetrics(user.id)
@@ -32,6 +36,11 @@ export const ProducerDashboard: React.FC = () => {
     user && user.role === 'PRODUCER' ? quotationService.getLocalQuotations(user.id) : []
   );
   const [activeTab, setActiveTab] = useState<'ALL' | QuotationStatus>('ALL');
+
+  const handleDismissPublishedMessage = () => {
+    quotationService.clearFlashMessage();
+    setPublishedMessage(null);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -138,6 +147,32 @@ export const ProducerDashboard: React.FC = () => {
       />
 
       <div className="max-w-7xl mx-auto space-y-8">
+        {/* Published Quotation Success Flash Message */}
+        {publishedMessage && (
+          <div
+            role="status"
+            className="bg-emerald-50 border-2 border-emerald-500 text-emerald-900 rounded-2xl p-5 shadow-soft flex items-center justify-between gap-4 animate-fade-in"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-emerald-950">Sucesso!</h3>
+                <p className="text-sm font-medium text-emerald-800">{publishedMessage}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissPublishedMessage}
+              aria-label="Fechar aviso de cotação publicada"
+              className="p-1.5 rounded-lg text-emerald-700 hover:text-emerald-950 hover:bg-emerald-100 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
         {/* Welcome Notification Banner */}
         {showWelcomeNotice && (
           <div className="bg-gradient-to-r from-agro-800 to-agro-900 text-white rounded-2xl p-5 sm:p-6 shadow-soft flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fade-in">

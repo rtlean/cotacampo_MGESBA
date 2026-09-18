@@ -229,4 +229,95 @@ describe('quotation-wizard.schema (US06 Passo 1)', () => {
       }
     });
   });
+
+  describe('Passo 3 – Condições Comerciais e Publicação (US08)', () => {
+    it('deve validar com sucesso quando os campos comerciais forem válidos (CIF, 30/60 dias, 48h)', async () => {
+      const { step3CommercialSchema } = await import('../quotation-wizard.schema');
+
+      const validCommercial = {
+        freightType: 'CIF',
+        paymentTerms: '30/60 dias',
+        proposalLimitHours: 48,
+        notes: 'Entregar no galpão principal.',
+      };
+
+      const result = step3CommercialSchema.safeParse(validCommercial);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.freightType).toBe('CIF');
+        expect(result.data.paymentTerms).toBe('30/60 dias');
+        expect(result.data.proposalLimitHours).toBe(48);
+        expect(result.data.notes).toBe('Entregar no galpão principal.');
+      }
+    });
+
+    it('deve validar modalidade FOB e outras condições de pagamento', async () => {
+      const { step3CommercialSchema } = await import('../quotation-wizard.schema');
+
+      const fobCommercial = {
+        freightType: 'FOB',
+        paymentTerms: 'À vista',
+        proposalLimitHours: 24,
+      };
+
+      const result = step3CommercialSchema.safeParse(fobCommercial);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.freightType).toBe('FOB');
+        expect(result.data.paymentTerms).toBe('À vista');
+        expect(result.data.proposalLimitHours).toBe(24);
+      }
+    });
+
+    it('deve reprovar quando a modalidade de frete não for informada', async () => {
+      const { step3CommercialSchema } = await import('../quotation-wizard.schema');
+
+      const missingFreight = step3CommercialSchema.safeParse({
+        paymentTerms: '30/60 dias',
+        proposalLimitHours: 48,
+      });
+
+      expect(missingFreight.success).toBe(false);
+      if (!missingFreight.success) {
+        expect(missingFreight.error.flatten().fieldErrors.freightType).toContain(
+          'Selecione a modalidade de frete'
+        );
+      }
+    });
+
+    it('deve reprovar quando a condição de pagamento não for informada ou for vazia', async () => {
+      const { step3CommercialSchema } = await import('../quotation-wizard.schema');
+
+      const missingPayment = step3CommercialSchema.safeParse({
+        freightType: 'CIF',
+        paymentTerms: '',
+        proposalLimitHours: 48,
+      });
+
+      expect(missingPayment.success).toBe(false);
+      if (!missingPayment.success) {
+        expect(missingPayment.error.flatten().fieldErrors.paymentTerms).toContain(
+          'Selecione a condição de pagamento'
+        );
+      }
+    });
+
+    it('deve reprovar quando o prazo limite for menor ou igual a zero', async () => {
+      const { step3CommercialSchema } = await import('../quotation-wizard.schema');
+
+      const zeroHours = step3CommercialSchema.safeParse({
+        freightType: 'CIF',
+        paymentTerms: '30/60 dias',
+        proposalLimitHours: 0,
+      });
+
+      expect(zeroHours.success).toBe(false);
+      if (!zeroHours.success) {
+        expect(zeroHours.error.flatten().fieldErrors.proposalLimitHours).toContain(
+          'Selecione o prazo limite para propostas'
+        );
+      }
+    });
+  });
 });
+

@@ -22,6 +22,10 @@ export interface QuotationRequest {
   targetState: SupportedState;
   targetCity: string;
   deadline: string;
+  freightType?: FreightType;
+  paymentTerms?: string;
+  proposalLimitHours?: number;
+  displayCode?: string;
   notes?: string;
   items?: QuotationItem[];
   itemsCount?: number;
@@ -68,6 +72,21 @@ export interface RecipeAttachment {
   dataUrl?: string;
 }
 
+export type FreightType = 'CIF' | 'FOB';
+
+export interface QuotationNotification {
+  id: string;
+  quotationId: string;
+  quotationCode?: string;
+  resellerId?: string;
+  resellerName?: string;
+  targetCity: string;
+  targetState: SupportedState;
+  message: string;
+  read: boolean;
+  createdAt: string;
+}
+
 export interface QuotationDraft {
   farmId?: string;
   farmName?: string;
@@ -77,6 +96,9 @@ export interface QuotationDraft {
   targetCropName?: string;
   items?: QuotationItem[];
   prescription?: RecipeAttachment;
+  freightType?: FreightType;
+  paymentTerms?: string;
+  proposalLimitHours?: number;
   title?: string;
   notes?: string;
   updatedAt?: string;

@@ -1,9 +1,10 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NewQuotationPage } from '../NewQuotationPage';
 import { AuthProvider } from '../../context/AuthContext';
 import { ProducerProfile, ResellerProfile } from '../../types/user';
 import { quotationService } from '../../services/quotation.service';
+import { supabase } from '../../services/supabase';
 
 describe('US06 – Wizard de Cotação: Passo 1 – Destino e Cultura', () => {
   const mockProducer: ProducerProfile = {
@@ -38,6 +39,17 @@ describe('US06 – Wizard de Cotação: Passo 1 – Destino e Cultura', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    vi.clearAllMocks();
+
+    vi.spyOn(supabase, 'from').mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        }),
+      }),
+      upsert: vi.fn().mockResolvedValue({ data: null, error: null }),
+      insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+    } as unknown as ReturnType<typeof supabase.from>);
   });
 
   it('Cenário 1: Preenchimento e avanço válido no Passo 1 (Café Conilon)', async () => {
@@ -486,4 +498,200 @@ describe('US06 – Wizard de Cotação: Passo 1 – Destino e Cultura', () => {
       expect(screen.getByRole('heading', { level: 1, name: /Passo 2: Itens, Genéricos e Receituário/i })).toBeInTheDocument();
     });
   });
+
+  describe('US08 – Wizard de Cotação: Passo 3 – Condições Comerciais e Publicação', () => {
+    const advanceToStep3 = () => {
+      localStorage.setItem('cotacampo_auth_user', JSON.stringify(mockProducer));
+      render(
+        <AuthProvider>
+          <NewQuotationPage />
+        </AuthProvider>
+      );
+
+      // Passo 1 -> Passo 2
+      fireEvent.change(screen.getByLabelText(/Propriedade Rural de Destino/i), {
+        target: { value: 'farm_primary' },
+      });
+      fireEvent.click(screen.getByRole('radio', { name: /Café Conilon/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Avançar para Itens/i }));
+
+      // Passo 2: adiciona item
+      const searchInput = screen.getByPlaceholderText(/Ex: Mancozeb 750 WG.../i);
+      fireEvent.change(searchInput, { target: { value: 'Mancozeb 750 WG' } });
+      const qtyInput = screen.getByPlaceholderText(/Ex: 50/i);
+      fireEvent.change(qtyInput, { target: { value: '50' } });
+      fireEvent.click(screen.getByRole('button', { name: /Adicionar Item/i }));
+
+      // Anexa receituário
+      const fileInput = document.getElementById('prescription-upload') as HTMLInputElement;
+      const pdfFile = new File(['pdf-receita-content'], 'receituario.pdf', {
+        type: 'application/pdf',
+      });
+      fireEvent.change(fileInput, { target: { files: [pdfFile] } });
+
+      // Avança para o Passo 3
+      fireEvent.click(screen.getByRole('button', { name: /Avançar para Condições Comerciais/i }));
+      expect(screen.getByRole('heading', { level: 1, name: /Passo 3: Condições Comerciais e Publicação/i })).toBeInTheDocument();
+    };
+
+    it('Cenário 1: Publicação com frete CIF e prazo limite de 48 horas', async () => {
+      advanceToStep3();
+
+      // 1. Seleciona o frete "CIF (Entregue na propriedade)"
+      const cifOption = screen.getByLabelText(/CIF \(Entregue na propriedade\)/i);
+      fireEvent.click(cifOption);
+      expect(cifOption).toBeChecked();
+
+      // 2. Seleciona a condição de pagamento "30/60 dias"
+      const paymentSelect = screen.getByLabelText(/Condição de Pagamento/i);
+      fireEvent.change(paymentSelect, { target: { value: '30/60 dias' } });
+      expect(paymentSelect).toHaveValue('30/60 dias');
+
+      // 3. Define o prazo limite para propostas como "48 horas"
+      const deadlineOption = screen.getByLabelText(/48 horas/i);
+      fireEvent.click(deadlineOption);
+      expect(deadlineOption).toBeChecked();
+
+      // 4. Clica no botão [ Publicar Cotação ]
+      const publishButton = screen.getByRole('button', { name: /Publicar Cotação/i });
+      fireEvent.click(publishButton);
+
+      // 5. Valida que a cotação transitou para o status OPEN no banco de dados local
+      await waitFor(() => {
+        const quotes = quotationService.getLocalQuotations(mockProducer.id);
+        expect(quotes.length).toBe(1);
+        expect(quotes[0].status).toBe('OPEN');
+        expect(quotes[0].freightType).toBe('CIF');
+        expect(quotes[0].paymentTerms).toBe('30/60 dias');
+        expect(quotes[0].proposalLimitHours).toBe(48);
+        expect(quotes[0].targetCity).toBe('Linhares');
+        expect(quotes[0].targetState).toBe('ES');
+
+        const notifications = quotationService.getNotifications();
+        expect(notifications.length).toBeGreaterThan(0);
+        expect(notifications[0].targetCity).toBe('Linhares');
+        expect(notifications[0].message).toContain('Nova cotação #COT-001 aberta para entrega em Linhares/ES');
+
+        expect(quotationService.getFlashMessage()).toBe('Cotação #COT-001 publicada com sucesso!');
+        expect(quotationService.getDraft()).toBeNull();
+      });
+    });
+
+    it('Cenário 2: Validação de campos comerciais obrigatórios (bloqueio de submissão e destaque em vermelho)', async () => {
+      advanceToStep3();
+
+      // Tenta submeter sem selecionar frete e sem selecionar pagamento
+      const publishButton = screen.getByRole('button', { name: /Publicar Cotação/i });
+      fireEvent.click(publishButton);
+
+      // 1. Não deve enviar requisição ao backend (nenhuma cotação salva)
+      const quotes = quotationService.getLocalQuotations(mockProducer.id);
+      expect(quotes.length).toBe(0);
+
+      // 2. Destaca em vermelho os seletores pendentes
+      const freightSelector = screen.getByTestId('freight-type-selector');
+      expect(freightSelector.className).toContain('border-red-500');
+
+      const paymentSelect = screen.getByLabelText(/Condição de Pagamento/i);
+      expect(paymentSelect.className).toContain('border-red-500');
+
+      // 3. Exibe mensagens inline com alertas acessíveis
+      expect(screen.getByText('Selecione a modalidade de frete')).toBeInTheDocument();
+      expect(screen.getByText('Selecione a condição de pagamento')).toBeInTheDocument();
+      expect(screen.getByText('Por favor, preencha todos os campos obrigatórios em destaque.')).toBeInTheDocument();
+
+      // Testa preenchimento progressivo limpando os erros
+      const cifOption = screen.getByLabelText(/CIF \(Entregue na propriedade\)/i);
+      fireEvent.click(cifOption);
+      expect(screen.queryByText('Selecione a modalidade de frete')).not.toBeInTheDocument();
+
+      // Clica em um dos atalhos de botão de pagamento
+      const paymentButton = screen.getByRole('button', { name: '30/60 dias' });
+      fireEvent.click(paymentButton);
+      expect(screen.queryByText('Selecione a condição de pagamento')).not.toBeInTheDocument();
+    });
+
+    it('deve publicar com sucesso na modalidade FOB e condição de pagamento À vista com observações', async () => {
+      advanceToStep3();
+
+      // Seleciona FOB
+      const fobOption = screen.getByLabelText(/FOB \(Retirada na revenda\)/i);
+      fireEvent.click(fobOption);
+
+      // Seleciona À vista através do atalho de botão
+      const aVistaBtn = screen.getByRole('button', { name: 'À vista' });
+      fireEvent.click(aVistaBtn);
+
+      // Seleciona 24 horas
+      const deadline24h = screen.getByLabelText(/24 horas/i);
+      fireEvent.click(deadline24h);
+
+      // Preenche instruções opcionais
+      const notesArea = screen.getByPlaceholderText(/Ex: Entregar preferencialmente pela manhã/i);
+      fireEvent.change(notesArea, { target: { value: 'Retirada rápida por caminhonete.' } });
+
+      // Publica
+      const publishButton = screen.getByRole('button', { name: /Publicar Cotação/i });
+      fireEvent.click(publishButton);
+
+      await waitFor(() => {
+        const quotes = quotationService.getLocalQuotations(mockProducer.id);
+        expect(quotes.length).toBe(1);
+        expect(quotes[0].freightType).toBe('FOB');
+        expect(quotes[0].paymentTerms).toBe('À vista');
+        expect(quotes[0].proposalLimitHours).toBe(24);
+        expect(quotes[0].notes).toBe('Retirada rápida por caminhonete.');
+      });
+    });
+
+    it('deve tratar exceção durante a publicação exibindo mensagem de erro amigável', async () => {
+      advanceToStep3();
+
+      // Preenche campos válidos
+      fireEvent.click(screen.getByLabelText(/CIF \(Entregue na propriedade\)/i));
+      fireEvent.change(screen.getByLabelText(/Condição de Pagamento/i), { target: { value: '30 dias' } });
+
+      // Mock de falha na publicação
+      const publishSpy = vi.spyOn(quotationService, 'publishQuotation').mockRejectedValueOnce(new Error('Network error'));
+
+      const publishButton = screen.getByRole('button', { name: /Publicar Cotação/i });
+      fireEvent.click(publishButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Ocorreu um erro ao publicar a cotação. Tente novamente.')).toBeInTheDocument();
+      });
+
+      publishSpy.mockRestore();
+    });
+
+    it('deve bloquear publicação se o produtor não estiver autenticado', () => {
+      // Salva rascunho com dados prontos para avançar
+      localStorage.setItem('cotacampo_quotation_draft', JSON.stringify({
+        farmId: 'farm_primary',
+        targetCrop: 'cafe_conilon',
+        items: [{ productName: 'Mancozeb 750 WG', quantity: 50, unit: 'Kg' }],
+      }));
+
+      // Renderiza sem autenticar produtor
+      render(
+        <AuthProvider>
+          <NewQuotationPage />
+        </AuthProvider>
+      );
+
+      // Avança para o Passo 2 e Passo 3
+      fireEvent.click(screen.getByRole('button', { name: /Avançar para Itens/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Avançar para Condições Comerciais/i }));
+
+      // Preenche dados válidos do Passo 3
+      fireEvent.click(screen.getByLabelText(/CIF \(Entregue na propriedade\)/i));
+      fireEvent.change(screen.getByLabelText(/Condição de Pagamento/i), { target: { value: '30/60 dias' } });
+
+      // Submete
+      fireEvent.click(screen.getByRole('button', { name: /Publicar Cotação/i }));
+
+      expect(screen.getByText('Usuário produtor não autenticado.')).toBeInTheDocument();
+    });
+  });
 });
+

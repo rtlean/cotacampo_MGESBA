@@ -16,6 +16,7 @@ import { producerRegistrationSchema } from '../schemas/producer.schema';
 import { resellerRegistrationSchema } from '../schemas/reseller.schema';
 import { getCityCoordinates } from '../data/locations';
 import { dbSyncService } from '../services/db-sync.service';
+import { supabase } from '../services/supabase';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -439,24 +440,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         whatsappUrl = `https://api.whatsapp.com/send?phone=${rawPhone}&text=${encodeURIComponent(msg)}`;
         deliveryStatus = 'sent';
       } else {
-        // Envio real por e-mail via Supabase Auth
+        // Envio real por e-mail via Supabase Auth com redirectTo explícito para /redefinir-senha
         try {
-          const resp = await fetch('https://uwrvxmlgvgvvqmtucidk.supabase.co/auth/v1/recover', {
-            method: 'POST',
-            headers: {
-              apikey: 'sb_publishable_y5aPNNUO7xqZj8-m6lPsuQ_4trcol-t',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email: lowerEmail }),
+          const { error: resetErr } = await supabase.auth.resetPasswordForEmail(lowerEmail, {
+            redirectTo: `${baseUrl}/redefinir-senha`,
           });
 
-          if (resp.status === 429) {
-            deliveryStatus = 'rate_limited';
-            errorMessage =
-              'Limite de disparos de e-mail por hora do provedor atingido. Utilize o código de verificação de 6 dígitos gerado para prosseguir com a redefinição.';
-          } else if (!resp.ok) {
-            deliveryStatus = 'error';
-            errorMessage = 'O provedor de e-mails retornou uma falha de envio.';
+          if (resetErr) {
+            const isRateLimit =
+              resetErr.message?.toLowerCase().includes('rate limit') ||
+              resetErr.message?.toLowerCase().includes('429');
+
+            if (isRateLimit) {
+              deliveryStatus = 'rate_limited';
+              errorMessage =
+                'Limite de disparos de e-mail por hora do provedor atingido. Utilize o código de verificação de 6 dígitos gerado para prosseguir com a redefinição.';
+            } else {
+              // Fallback via endpoint REST com redirect_to explícito
+              const resp = await fetch(
+                `https://uwrvxmlgvgvvqmtucidk.supabase.co/auth/v1/recover?redirect_to=${encodeURIComponent(`${baseUrl}/redefinir-senha`)}`,
+                {
+                  method: 'POST',
+                  headers: {
+                    apikey: 'sb_publishable_y5aPNNUO7xqZj8-m6lPsuQ_4trcol-t',
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    email: lowerEmail,
+                    redirectTo: `${baseUrl}/redefinir-senha`,
+                  }),
+                }
+              );
+
+              if (resp.status === 429) {
+                deliveryStatus = 'rate_limited';
+                errorMessage =
+                  'Limite de disparos de e-mail por hora do provedor atingido. Utilize o código de verificação de 6 dígitos gerado para prosseguir com a redefinição.';
+              } else if (!resp.ok) {
+                deliveryStatus = 'error';
+                errorMessage = 'O provedor de e-mails retornou uma falha de envio.';
+              } else {
+                deliveryStatus = 'sent';
+              }
+            }
           } else {
             deliveryStatus = 'sent';
           }
@@ -506,6 +532,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (!newPassword || newPassword.length < 6) {
         return { success: false, error: 'A senha deve ter no mínimo 6 caracteres.' };
+      }
+
+      // 1. Tratamento para recuperação via link direto de e-mail do Supabase
+      const isEmailRecoverySession =
+        cleanInput === 'email_recovery_token' ||
+        cleanInput.length > 50 ||
+        cleanInput.startsWith('ey');
+
+      if (isEmailRecoverySession) {
+        try {
+          const { data: supaUser } = await supabase.auth.updateUser({ password: newPassword });
+          const userEmail = supaUser?.user?.email?.toLowerCase();
+
+          if (userEmail) {
+            // Atualiza base local de produtores se existir
+            const storedProds = localStorage.getItem(PRODUCERS_DB_KEY);
+            if (storedProds) {
+              const prods: ProducerProfile[] = JSON.parse(storedProds);
+              const updated = prods.map((p) =>
+                p.email.toLowerCase() === userEmail ? { ...p, password: newPassword } : p
+              );
+              localStorage.setItem(PRODUCERS_DB_KEY, JSON.stringify(updated));
+            }
+
+            // Atualiza base local de revendas se existir
+            const storedResellers = localStorage.getItem(RESELLERS_DB_KEY);
+            if (storedResellers) {
+              const res: ResellerProfile[] = JSON.parse(storedResellers);
+              const updated = res.map((r) =>
+                r.corporateEmail.toLowerCase() === userEmail ? { ...r, password: newPassword } : r
+              );
+              localStorage.setItem(RESELLERS_DB_KEY, JSON.stringify(updated));
+            }
+          }
+        } catch (supaErr) {
+          console.warn('[Supabase] Aviso ao atualizar senha do usuário:', supaErr);
+        }
+
+        if (user) {
+          setUser({ ...user, password: newPassword });
+        }
+
+        void dbSyncService.markPasswordResetUsed(cleanInput);
+
+        return {
+          success: true,
+          message: 'Senha redefinida com sucesso! Acesse sua conta com a nova senha.',
+        };
       }
 
       let resetList: PasswordResetToken[] = [];

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Route, Switch, Redirect } from 'wouter';
+import React, { useEffect } from 'react';
+import { Route, Switch, Redirect, useLocation } from 'wouter';
 import { Navbar } from './components/Navbar';
 import { RegisterPage } from './pages/RegisterPage';
 import { LoginPage } from './pages/LoginPage';
@@ -7,8 +7,46 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { ProducerDashboard } from './pages/ProducerDashboard';
 import { ResellerDashboard } from './pages/ResellerDashboard';
+import { supabase } from './services/supabase';
 
 export const App: React.FC = () => {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    const currentPath = window.location.pathname;
+
+    const isRecovery =
+      hash.includes('type=recovery') ||
+      search.includes('type=recovery') ||
+      hash.includes('access_token=') ||
+      hash.includes('error=') ||
+      search.includes('error=') ||
+      hash.includes('error_code=') ||
+      search.includes('error_code=');
+
+    if (isRecovery && currentPath !== '/redefinir-senha') {
+      window.history.replaceState({}, '', `/redefinir-senha${search}${hash}`);
+      setLocation(`/redefinir-senha${search}${hash}`);
+    }
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        const currSearch = window.location.search || '';
+        const currHash = window.location.hash || '';
+        window.history.replaceState({}, '', `/redefinir-senha${currSearch}${currHash}`);
+        setLocation(`/redefinir-senha${currSearch}${currHash}`);
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [setLocation]);
+
   return (
     <div className="min-h-screen flex flex-col bg-sand-50">
       <Navbar />

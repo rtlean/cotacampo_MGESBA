@@ -121,4 +121,28 @@ describe('ResetPasswordPage', () => {
       expect(screen.getByRole('link', { name: /fazer login/i })).toHaveAttribute('href', '/login');
     });
   });
+
+  it('deve identificar link de recuperação do e-mail via hash fragment (#access_token=...&type=recovery) e exibir banner de link autenticado', () => {
+    window.history.pushState(
+      {},
+      '',
+      '/redefinir-senha#access_token=mock_jwt_token&expires_in=3600&refresh_token=mock_refresh&token_type=bearer&type=recovery'
+    );
+    renderWithAuth(<ResetPasswordPage />);
+
+    expect(screen.getByText(/link de e-mail verificado com sucesso/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^nova senha/i)).toBeInTheDocument();
+  });
+
+  it('deve exibir mensagem de erro amigável se o link do e-mail tiver expirado no Supabase (#error_description=Email+link+is+invalid+or+has+expired)', () => {
+    window.history.pushState(
+      {},
+      '',
+      '/redefinir-senha#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired'
+    );
+    renderWithAuth(<ResetPasswordPage />);
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/expirado ou inválido/i);
+  });
 });

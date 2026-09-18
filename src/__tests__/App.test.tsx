@@ -63,4 +63,50 @@ describe('App - Roteamento Global e Redirecionamento de Recuperação por E-mail
       expect(screen.getByRole('alert')).toHaveTextContent(/expirado ou inválido/i);
     });
   });
+
+  it('deve redirecionar para /redefinir-senha no evento PASSWORD_RECOVERY do authListener', async () => {
+    let authCallback: ((event: string) => void) | null = null;
+    const { supabase } = await import('../services/supabase');
+
+    vi.spyOn(supabase.auth, 'onAuthStateChange').mockImplementation((callback) => {
+      authCallback = callback as (event: string) => void;
+      return {
+        data: {
+          subscription: {
+            unsubscribe: vi.fn(),
+            id: 'mock-sub',
+            callback: vi.fn(),
+          },
+        },
+      };
+    });
+
+    renderApp();
+
+    if (authCallback) {
+      authCallback('PASSWORD_RECOVERY');
+    }
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/redefinir-senha');
+    });
+  });
+
+  it('deve redirecionar rotas inexistentes para /cadastro', async () => {
+    window.history.pushState({}, '', '/rota-inexistente-12345');
+    renderApp();
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/cadastro');
+    });
+  });
+
+  it('deve renderizar NewQuotationPage na rota /produtor/cotacoes/nova', async () => {
+    window.history.pushState({}, '', '/produtor/cotacoes/nova');
+    renderApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Nova Cotação de Insumos/i })).toBeInTheDocument();
+    });
+  });
 });

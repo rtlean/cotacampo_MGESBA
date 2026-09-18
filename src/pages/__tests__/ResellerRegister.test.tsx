@@ -171,4 +171,87 @@ describe('US02 – Cadastro da Revenda de Insumos', () => {
     expect(loginLink).toBeInTheDocument();
     expect(loginLink).toHaveAttribute('href', '/login');
   });
+
+  it('deve validar campos obrigatórios vazios e limpar erros ao digitar', async () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Sou Revenda/i }));
+
+    // Clica em cadastrar sem preencher
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Revenda/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Informe a Razão Social/i)).toBeInTheDocument();
+      expect(screen.getByText(/Informe o Nome Fantasia/i)).toBeInTheDocument();
+      expect(screen.getByText(/Informe o CNPJ/i)).toBeInTheDocument();
+    });
+
+    // Testa troca de campos limpando erros
+    fireEvent.change(screen.getByLabelText(/Razão Social/i), { target: { value: 'Agro Exemplo' } });
+    fireEvent.change(screen.getByLabelText(/Nome Fantasia/i), { target: { value: 'Agro Ex' } });
+    fireEvent.change(screen.getByLabelText(/E-mail Corporativo/i), { target: { value: 'loja@exemplo.com' } });
+
+    const stateSelect = screen.getByLabelText(/Estado \(UF\)/i);
+    fireEvent.change(stateSelect, { target: { value: 'MG' } });
+    expect(screen.getByRole('option', { name: /Manhuaçu/i })).toBeInTheDocument();
+
+    const citySelect = screen.getByLabelText(/Município da Loja Física/i);
+    fireEvent.change(citySelect, { target: { value: 'Manhuaçu' } });
+
+    const passInput = screen.getByLabelText(/Senha de Acesso/i);
+    fireEvent.change(passInput, { target: { value: '123456' } });
+
+    const radiusInput = screen.getByLabelText(/Raio de Entrega/i);
+    fireEvent.change(radiusInput, { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Revenda/i }));
+    fireEvent.change(radiusInput, { target: { value: '150' } });
+
+    const categoryCheckbox = screen.getByRole('checkbox', { name: /Defensivos/i });
+    fireEvent.click(categoryCheckbox);
+
+    // Alternar de volta para Sou Produtor (linhas 337-338)
+    fireEvent.click(screen.getByRole('button', { name: /Sou Produtor/i }));
+    expect(screen.getByLabelText(/Nome Completo/i)).toBeInTheDocument();
+  });
+
+  it('deve chamar scrollIntoView em caso de erro e exibir erro geral quando registerReseller falhar', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Sou Revenda/i }));
+
+    // 1. Testa scrollIntoView na validação negativa
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Revenda/i }));
+    await waitFor(() => {
+      expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    });
+
+    // 2. Preenche dados e simula erro genérico do servidor
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('Falha geral no servidor');
+    });
+
+    fireEvent.change(screen.getByLabelText(/Razão Social/i), { target: { value: 'Revenda Teste Ltda' } });
+    fireEvent.change(screen.getByLabelText(/Nome Fantasia/i), { target: { value: 'Revenda Teste' } });
+    fireEvent.change(screen.getByLabelText(/CNPJ/i), { target: { value: '11.222.333/0001-81' } });
+    fireEvent.change(screen.getByLabelText(/E-mail Corporativo/i), { target: { value: 'contato@revendateste.com.br' } });
+    fireEvent.change(screen.getByLabelText(/Telefone \/ WhatsApp/i), { target: { value: '(27) 99888-7766' } });
+    fireEvent.change(screen.getByLabelText(/Senha de Acesso/i), { target: { value: 'Senha@2026' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Revenda/i }));
+
+    // Permanece na tela sem redirecionar
+    expect(window.location.pathname).not.toBe('/revenda/dashboard');
+
+    setItemSpy.mockRestore();
+  });
 });

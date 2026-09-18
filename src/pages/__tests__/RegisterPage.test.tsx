@@ -112,4 +112,59 @@ describe('RegisterPage (Fatia Vertical: Cadastro do Produtor Rural)', () => {
     // Boas-vindas ao produtor
     expect(screen.getAllByText(/Bem-vindo ao CotaCampo, Roberto!/i).length).toBeGreaterThanOrEqual(1);
   });
+
+  it('deve chamar scrollIntoView e limpar erros ao digitar nos campos do produtor', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    // Submete em branco
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Produtor/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Informe seu nome completo/i)).toBeInTheDocument();
+    });
+
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+
+    // Digita nos campos para limpar erros
+    fireEvent.change(screen.getByLabelText(/Nome Completo/i), { target: { value: 'Nome' } });
+    fireEvent.change(screen.getByLabelText(/E-mail/i), { target: { value: 'email@agro.com' } });
+    fireEvent.change(screen.getByLabelText(/Senha de Acesso/i), { target: { value: '123456' } });
+    fireEvent.change(screen.getByLabelText(/Nome da Fazenda \/ Sítio/i), { target: { value: 'Sítio' } });
+    fireEvent.change(screen.getByLabelText(/Município/i), { target: { value: 'Linhares' } });
+  });
+
+  it('deve exibir alert quando o cadastro do produtor falhar no servidor', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('Falha no banco');
+    });
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    fireEvent.change(screen.getByLabelText(/Nome Completo/i), { target: { value: 'Carlos Erro' } });
+    fireEvent.change(screen.getByLabelText(/E-mail/i), { target: { value: 'carlos@erro.com' } });
+    fireEvent.change(screen.getByLabelText(/Telefone \/ WhatsApp/i), { target: { value: '27998765432' } });
+    fireEvent.change(screen.getByLabelText(/Senha de Acesso/i), { target: { value: 'Safra@2026' } });
+    fireEvent.change(screen.getByLabelText(/Nome da Fazenda \/ Sítio/i), { target: { value: 'Fazenda Erro' } });
+    fireEvent.change(screen.getByLabelText(/Município/i), { target: { value: 'Linhares' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta de Produtor/i }));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Falha no banco'));
+    });
+
+    alertSpy.mockRestore();
+    setItemSpy.mockRestore();
+  });
 });

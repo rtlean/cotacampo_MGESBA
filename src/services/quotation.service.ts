@@ -37,16 +37,10 @@ export const quotationService = {
   /**
    * Recupera todas as cotações associadas a um produtor (local + Supabase)
    */
-  async getProducerQuotations(producerId: string): Promise<QuotationRequest[]> {
+  async getProducerQuotations(producerId: string, options?: { skipRemote?: boolean }): Promise<QuotationRequest[]> {
     const localQuotes = this.getLocalQuotations(producerId);
 
-    const isTestEnv =
-      (typeof globalThis !== 'undefined' &&
-        (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } })?.process?.env
-          ?.NODE_ENV === 'test') ||
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE === 'test');
-
-    if (isTestEnv || !isSupabaseConfigured || typeof window === 'undefined') {
+    if (options?.skipRemote || !isSupabaseConfigured || typeof window === 'undefined') {
       return localQuotes;
     }
 
@@ -121,8 +115,8 @@ export const quotationService = {
   /**
    * Calcula as métricas consolidadas do produtor por status
    */
-  async getProducerMetrics(producerId: string): Promise<QuotationMetrics> {
-    const quotations = await this.getProducerQuotations(producerId);
+  async getProducerMetrics(producerId: string, options?: { skipRemote?: boolean }): Promise<QuotationMetrics> {
+    const quotations = await this.getProducerQuotations(producerId, options);
 
     const openCount = quotations.filter((q) => q.status === 'OPEN').length;
     const inReviewCount = quotations.filter((q) => q.status === 'IN_REVIEW').length;

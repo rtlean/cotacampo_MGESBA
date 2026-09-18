@@ -145,4 +145,49 @@ describe('ResetPasswordPage', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(/expirado ou inválido/i);
   });
+
+  it('deve exibir erro quando submetido com senhas diferentes', async () => {
+    window.history.pushState({}, '', '/redefinir-senha?token=rst_valid_123');
+    renderWithAuth(<ResetPasswordPage />);
+
+    fireEvent.change(screen.getByLabelText(/^nova senha/i), {
+      target: { value: 'Senha@123' },
+    });
+    fireEvent.change(screen.getByLabelText(/confirmar nova senha/i), {
+      target: { value: 'Diferente@123' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /salvar nova senha/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent(/as senhas não coincidem/i);
+    });
+  });
+
+  it('deve permitir digitar código de 6 dígitos manualmente e exibir erro se campo de código estiver vazio', async () => {
+    window.history.pushState({}, '', '/redefinir-senha');
+    renderWithAuth(<ResetPasswordPage />);
+
+    const codeInput = screen.getByLabelText(/código de 6 dígitos ou token/i);
+    fireEvent.change(codeInput, { target: { value: '' } });
+
+    fireEvent.change(screen.getByLabelText(/^nova senha/i), {
+      target: { value: 'NovaSenha@2026' },
+    });
+    fireEvent.change(screen.getByLabelText(/confirmar nova senha/i), {
+      target: { value: 'NovaSenha@2026' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /salvar nova senha/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent(/informe o código de 6 dígitos ou o link/i);
+    });
+
+    // Digita no input de código
+    fireEvent.change(codeInput, { target: { value: '123456' } });
+    expect((codeInput as HTMLInputElement).value).toBe('123456');
+  });
 });

@@ -188,4 +188,75 @@ describe('US03 – Autenticação Unificada e Roteamento por Perfil', () => {
     expect(forgotLink).toBeInTheDocument();
     expect(forgotLink).toHaveAttribute('href', '/recuperar-senha');
   });
+
+  it('deve realizar login rápido de demonstração para Produtor Demo', async () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    const demoProdBtn = screen.getByRole('button', { name: /Produtor Rural \(Linhares - ES\)/i });
+    fireEvent.click(demoProdBtn);
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/produtor/dashboard');
+    });
+  });
+
+  it('deve realizar login rápido de demonstração para Revenda Demo', async () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    const demoResBtn = screen.getByRole('button', { name: /Revenda de Insumos \(Linhares - ES\)/i });
+    fireEvent.click(demoResBtn);
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/revenda/dashboard');
+    });
+  });
+
+  it('deve exibir erro quando submetido com campos vazios', async () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Entrar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('E-mail/telefone ou senha incorretos.')).toBeInTheDocument();
+    });
+  });
+
+  it('deve capturar erro inesperado durante tentativa de login', async () => {
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementationOnce(() => {
+      throw new Error('Database read crash');
+    });
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    fireEvent.change(screen.getByLabelText(/E-mail ou Telefone/i), {
+      target: { value: 'teste@agro.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/Senha/i), {
+      target: { value: '123456' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Entrar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('E-mail/telefone ou senha incorretos.')).toBeInTheDocument();
+    });
+
+    getItemSpy.mockRestore();
+  });
 });

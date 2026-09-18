@@ -57,14 +57,13 @@ export const Navbar: React.FC = () => {
                 </Link>
 
                 {user.role === 'PRODUCER' && (
-                  <button
-                    type="button"
-                    onClick={() => alert('O módulo de publicação de cotação estará disponível em breve.')}
+                  <Link
+                    href="/produtor/cotacoes/nova"
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-agro-600 hover:bg-agro-700 text-white text-xs font-semibold shadow-sm transition-colors"
                   >
                     <PlusCircle className="w-4 h-4" />
                     <span className="hidden sm:inline">Nova Cotação</span>
-                  </button>
+                  </Link>
                 )}
 
                 <button

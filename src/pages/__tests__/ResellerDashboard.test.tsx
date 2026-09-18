@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { App } from '../../App';
 import { AuthProvider } from '../../context/AuthContext';
 import { ResellerProfile } from '../../types/user';
@@ -54,5 +54,51 @@ describe('ResellerDashboard Component', () => {
 
     // Mural de oportunidades
     expect(screen.getByText(/Mural de Cotações Disponíveis/i)).toBeInTheDocument();
+  });
+
+  it('deve exibir tela de acesso restrito se o usuário não for RESELLER', () => {
+    localStorage.removeItem('cotacampo_auth_user');
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    expect(screen.getByText(/Acesso Restrito à Revenda/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Cadastrar Minha Revenda/i })).toHaveAttribute('href', '/cadastro');
+  });
+
+  it('deve permitir dispensar o banner de boas-vindas da revenda', () => {
+    sessionStorage.setItem('cotacampo_welcome_notice', 'true');
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    expect(screen.getByText(/Bem-vindo ao CotaCampo/i)).toBeInTheDocument();
+    const dismissBtn = screen.getByRole('button', { name: /Dispensar/i });
+    fireEvent.click(dismissBtn);
+
+    expect(screen.queryByText(/Bem-vindo ao CotaCampo/i)).not.toBeInTheDocument();
+  });
+
+  it('deve exibir alerta informativo ao clicar em Enviar Proposta', () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    const submitButtons = screen.getAllByRole('button', { name: /Enviar Proposta/i });
+    expect(submitButtons.length).toBeGreaterThan(0);
+    submitButtons.forEach((btn) => fireEvent.click(btn));
+
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Envio de lances comerciais'));
+    alertSpy.mockRestore();
   });
 });

@@ -103,4 +103,18 @@ describe('ForgotPasswordPage', () => {
       expect(screen.getByRole('link', { name: /cadastrar nova senha com este código/i })).toBeInTheDocument();
     });
   });
+
+  it('deve formatar número progressivamente ao digitar DDD e dígitos parciais', () => {
+    renderWithAuth(<ForgotPasswordPage />);
+    const input = screen.getByLabelText(/e-mail ou whatsapp/i) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '27' } });
+    expect(input.value).toBe('(27');
+
+    fireEvent.change(input, { target: { value: '27998' } });
+    expect(input.value).toBe('(27) 998');
+
+    fireEvent.change(input, { target: { value: 'email@agro.com' } });
+    expect(input.value).toBe('email@agro.com');
+  });
 });

@@ -299,4 +299,86 @@ describe('Quotation Service', () => {
     consoleSpy.mockRestore();
     setItemSpy.mockRestore();
   });
+
+  describe('Rascunho de Cotação e Propriedades (US06)', () => {
+    it('deve salvar e recuperar rascunho de cotação com sucesso', () => {
+      expect(quotationService.getDraft()).toBeNull();
+
+      quotationService.saveDraft({
+        farmId: 'farm-1',
+        farmName: 'Fazenda Sol Nascente',
+        targetCity: 'Linhares',
+        targetState: 'ES',
+        targetCrop: 'cafe_conilon',
+        targetCropName: 'Café Conilon',
+      });
+
+      const draft = quotationService.getDraft();
+      expect(draft).not.toBeNull();
+      expect(draft?.farmId).toBe('farm-1');
+      expect(draft?.farmName).toBe('Fazenda Sol Nascente');
+      expect(draft?.targetCrop).toBe('cafe_conilon');
+      expect(draft?.updatedAt).toBeDefined();
+    });
+
+    it('deve limpar o rascunho com clearDraft', () => {
+      quotationService.saveDraft({
+        farmId: 'farm-1',
+        targetCrop: 'cacau',
+      });
+      expect(quotationService.getDraft()).not.toBeNull();
+
+      quotationService.clearDraft();
+      expect(quotationService.getDraft()).toBeNull();
+    });
+
+    it('deve tratar erros de JSON corrompido no rascunho e exceções no localStorage', () => {
+      localStorage.setItem('cotacampo_quotation_draft', 'invalid-draft-json{');
+      expect(quotationService.getDraft()).toBeNull();
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new Error('Disk full');
+      });
+
+      quotationService.saveDraft({ farmId: 'farm-err' });
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Erro ao salvar rascunho:'), expect.any(Error));
+
+      const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementationOnce(() => {
+        throw new Error('Remove error');
+      });
+      quotationService.clearDraft();
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Erro ao limpar rascunho:'), expect.any(Error));
+
+      consoleSpy.mockRestore();
+      setItemSpy.mockRestore();
+      removeItemSpy.mockRestore();
+    });
+
+    it('deve retornar propriedades do produtor autenticado ou fallback padrão', () => {
+      const farmsDefault = quotationService.getProducerFarms(null);
+      expect(farmsDefault.length).toBe(1);
+      expect(farmsDefault[0].name).toBe('Fazenda Santa Clara');
+
+      const mockProducer = {
+        id: 'prod-1',
+        name: 'Maria Produtora',
+        email: 'maria@agro.com',
+        whatsapp: '27999999999',
+        role: 'PRODUCER' as const,
+        farmName: 'Fazenda Bela Vista',
+        state: 'ES' as const,
+        city: 'Colatina',
+        crops: ['cafe' as const],
+        createdAt: new Date().toISOString(),
+      };
+
+      const farms = quotationService.getProducerFarms(mockProducer);
+      expect(farms.length).toBe(1);
+      expect(farms[0].name).toBe('Fazenda Bela Vista');
+      expect(farms[0].city).toBe('Colatina');
+      expect(farms[0].state).toBe('ES');
+    });
+  });
 });
+

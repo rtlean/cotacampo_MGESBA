@@ -1,12 +1,86 @@
-import { QuotationMetrics, QuotationRequest } from '../types/quotation';
+import { ProducerFarm, QuotationDraft, QuotationMetrics, QuotationRequest } from '../types/quotation';
+import { ProducerProfile } from '../types/user';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 const LOCAL_STORAGE_KEY = 'cotacampo_quotations';
+const DRAFT_STORAGE_KEY = 'cotacampo_quotation_draft';
 
 export const quotationService = {
   /**
+   * Salva o rascunho temporário do wizard de cotação
+   */
+  saveDraft(draft: QuotationDraft): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const updated = {
+        ...draft,
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error('Erro ao salvar rascunho:', e);
+    }
+  },
+
+  /**
+   * Recupera o rascunho atual da cotação
+   */
+  getDraft(): QuotationDraft | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const stored = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored) as QuotationDraft;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  },
+
+  /**
+   * Limpa o rascunho temporário
+   */
+  clearDraft(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch (e) {
+      console.error('Erro ao limpar rascunho:', e);
+    }
+  },
+
+  /**
+   * Retorna a lista de fazendas/propriedades cadastradas do produtor
+   */
+  getProducerFarms(user?: ProducerProfile | null): ProducerFarm[] {
+    if (!user) {
+      return [
+        {
+          id: 'farm_primary',
+          name: 'Fazenda Santa Clara',
+          city: 'Linhares',
+          state: 'ES',
+        },
+      ];
+    }
+
+    const farms: ProducerFarm[] = [
+      {
+        id: 'farm_primary',
+        name: user.farmName || 'Fazenda Principal',
+        city: user.city || 'Linhares',
+        state: user.state || 'ES',
+      },
+    ];
+
+    return farms;
+  },
+
+  /**
    * Recupera de forma síncrona as cotações salvas no cache local
    */
+
   getLocalQuotations(producerId: string): QuotationRequest[] {
     if (typeof window === 'undefined' || !producerId) return [];
     try {

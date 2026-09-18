@@ -35,3 +35,39 @@ export interface QuotationMetrics {
   awardedCount: number;
   totalCount: number;
 }
+
+export type TargetCropId =
+  | 'cafe_conilon'
+  | 'cafe_arabica'
+  | 'cacau'
+  | 'pimenta_reino'
+  | 'mamao';
+
+export interface TargetCropInfo {
+  id: TargetCropId;
+  name: string;
+  subtitle: string;
+  icon: string;
+  color: string;
+}
+
+export interface ProducerFarm {
+  id: string;
+  name: string;
+  city: string;
+  state: SupportedState;
+}
+
+export interface QuotationDraft {
+  farmId?: string;
+  farmName?: string;
+  targetCity?: string;
+  targetState?: SupportedState;
+  targetCrop?: TargetCropId;
+  targetCropName?: string;
+  items?: QuotationItem[];
+  title?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+

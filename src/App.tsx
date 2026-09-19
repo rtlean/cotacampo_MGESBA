@@ -7,6 +7,7 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { ProducerDashboard } from './pages/ProducerDashboard';
 import { ResellerDashboard } from './pages/ResellerDashboard';
+import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { NewQuotationPage } from './pages/NewQuotationPage';
 import { QuotationComparativePage } from './pages/QuotationComparativePage';
 import { supabase } from './services/supabase';
@@ -63,6 +64,7 @@ export const App: React.FC = () => {
           <Route path="/produtor/cotacoes/nova" component={NewQuotationPage} />
           <Route path="/produtor/cotacoes/:id/comparativo" component={QuotationComparativePage} />
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
+          <Route path="/revenda/oportunidades" component={OpportunitiesPage} />
           <Route>
             <Redirect to="/cadastro" />
           </Route>

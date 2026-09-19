@@ -204,10 +204,20 @@ export const ResellerDashboard: React.FC = () => {
                 Pedidos de produtores rurais dentro da sua área de cobertura logística
               </p>
             </div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-agro-50 text-agro-800 text-xs font-semibold border border-agro-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Mural atualizado em tempo real
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-agro-50 text-agro-800 text-xs font-semibold border border-agro-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Mural atualizado em tempo real
+              </span>
+              <Link
+                href="/revenda/oportunidades"
+                data-testid="link-full-opportunities"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-agro-700 hover:bg-agro-800 text-white text-xs font-semibold shadow-sm transition-colors"
+              >
+                <span>Acessar Mural Completo</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
 
           {/* Oportunidades List */}

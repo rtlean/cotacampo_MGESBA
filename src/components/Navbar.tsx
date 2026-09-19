@@ -66,6 +66,15 @@ export const Navbar: React.FC = () => {
                   </Link>
                 )}
 
+                {user.role === 'RESELLER' && (
+                  <Link
+                    href="/revenda/oportunidades"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-agro-700 hover:bg-agro-800 text-white text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    <span>Mural de Oportunidades</span>
+                  </Link>
+                )}
+
                 <button
                   type="button"
                   onClick={handleLogout}

@@ -9,7 +9,7 @@ import {
   ComparativeAnalysis,
   AwardedResellerSummary,
 } from '../types/quotation';
-import { ProducerProfile } from '../types/user';
+import { ProducerProfile, SupportedState } from '../types/user';
 import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
 import { supabase, isSupabaseConfigured } from './supabase';
 
@@ -687,6 +687,9 @@ export const quotationService = {
           rtv_name: bid.rtvName,
           rtv_phone: bid.rtvPhone,
           notes: bid.notes,
+          payment_method: bid.paymentMethod,
+          validity_hours: bid.validityHours,
+          barter_bags_count: bid.barterBagsCount,
         });
 
         if (bid.items && bid.items.length > 0) {
@@ -907,5 +910,113 @@ export const quotationService = {
    */
   async acceptBid(quotationId: string, acceptedBidId: string): Promise<void> {
     await this.acceptFullLot(quotationId, acceptedBidId);
+  },
+
+  /**
+   * US14: Emite notificação para o produtor quando uma proposta é recebida
+   */
+  async notifyProducerOnBidReceived(
+    quotation: QuotationRequest,
+    bid: QuotationBid
+  ): Promise<QuotationNotification> {
+    const notification: QuotationNotification = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `notif_${Date.now()}`,
+      quotationId: quotation.id,
+      quotationCode: quotation.displayCode,
+      targetCity: quotation.targetCity,
+      targetState: quotation.targetState,
+      message: `Proposta recebida da revenda ${bid.resellerTradeName || bid.resellerName} para a cotação #${quotation.displayCode || quotation.id.slice(0, 8)}. Total: R$ ${bid.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+        const list: QuotationNotification[] = stored ? JSON.parse(stored) : [];
+        list.unshift(notification);
+        localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.error('Erro ao salvar notificação localmente:', e);
+      }
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('quotation_notifications').insert({
+          id: notification.id,
+          quotation_id: notification.quotationId,
+          target_city: notification.targetCity,
+          target_state: notification.targetState,
+          message: notification.message,
+        });
+      } catch {
+        // Fallback resiliente
+      }
+    }
+
+    return notification;
+  },
+
+  /**
+   * US14: Envio de Proposta pelo Revendedor (RTV)
+   * Registra a oferta com status 'SUBMITTED', atualiza contador de propostas da cotação,
+   * salva no storage local e Supabase, e emite notificação para o produtor.
+   */
+  async submitBid(params: {
+    quotationId: string;
+    resellerId: string;
+    resellerName: string;
+    resellerTradeName?: string;
+    resellerCity?: string;
+    resellerState?: string;
+    rtvName?: string;
+    rtvPhone?: string;
+    items: QuotationBidItem[];
+    freightCost: number;
+    deliveryDays: number;
+    validityHours: number;
+    paymentMethod: 'AVISTA' | 'PRAZO_30' | 'PRAZO_60' | 'BARTER';
+    barterBagsCount?: number;
+    notes?: string;
+  }): Promise<QuotationBid> {
+    const subtotal = params.items.reduce((acc, it) => acc + it.totalPrice, 0);
+    const totalAmount = Number((subtotal + params.freightCost).toFixed(2));
+    const bidId = `bid_${params.quotationId}_${params.resellerId}_${Date.now()}`;
+
+    const newBid: QuotationBid = {
+      id: bidId,
+      quotationId: params.quotationId,
+      resellerId: params.resellerId,
+      resellerName: params.resellerName,
+      resellerTradeName: params.resellerTradeName,
+      resellerCity: params.resellerCity || 'Linhares',
+      resellerState: (params.resellerState as SupportedState) || 'ES',
+      rtvName: params.rtvName,
+      rtvPhone: params.rtvPhone,
+      items: params.items,
+      freightCost: params.freightCost,
+      deliveryDays: params.deliveryDays,
+      validityHours: params.validityHours,
+      paymentMethod: params.paymentMethod,
+      barterBagsCount: params.barterBagsCount,
+      totalAmount,
+      status: 'SUBMITTED',
+      awardType: 'NONE',
+      notes: params.notes,
+      createdAt: new Date().toISOString(),
+    };
+
+    await this.saveBid(newBid);
+
+    const quotation = await this.getQuotationById(params.quotationId);
+    if (quotation) {
+      quotation.bidsCount = (quotation.bidsCount || 0) + 1;
+      quotation.updatedAt = new Date().toISOString();
+      await this.saveQuotation(quotation);
+      await this.notifyProducerOnBidReceived(quotation, newBid);
+    }
+
+    return newBid;
   },
 };

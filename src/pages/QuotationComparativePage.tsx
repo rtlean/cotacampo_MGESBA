@@ -22,6 +22,7 @@ import {
   X,
   ShoppingCart,
   ExternalLink,
+  CreditCard,
 } from 'lucide-react';
 import { quotationService } from '../services/quotation.service';
 import {
@@ -875,6 +876,61 @@ export const QuotationComparativePage: React.FC = () => {
                             <span>{bid.deliveryDays} {bid.deliveryDays === 1 ? 'dia' : 'dias'}</span>
                             {isFastest && <Zap className="w-3.5 h-3.5 text-blue-600 inline" />}
                           </span>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+
+                {/* Condições Comerciais, Pagamento & Barter Row */}
+                <tr className="bg-white border-t border-slate-200 font-medium">
+                  <td className="p-4 sm:p-5 sticky left-0 bg-white/95 z-10 border-r border-slate-200 text-slate-700">
+                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <CreditCard className="w-4 h-4 text-slate-500" />
+                      <span>Condições Comerciais</span>
+                    </div>
+                    <div className="text-xs text-slate-500 font-normal mt-0.5">
+                      Pagamento e validade da proposta
+                    </div>
+                  </td>
+
+                  {bids.map((bid) => {
+                    const isBarter = bid.paymentMethod === 'BARTER';
+                    const paymentLabel =
+                      bid.paymentMethod === 'AVISTA'
+                        ? 'À Vista'
+                        : bid.paymentMethod === 'PRAZO_30'
+                        ? 'A Prazo (30 dias)'
+                        : bid.paymentMethod === 'PRAZO_60'
+                        ? 'A Prazo (60 dias)'
+                        : bid.paymentMethod === 'BARTER'
+                        ? 'Barter / Permuta em Sacas'
+                        : 'Condições Padrão';
+
+                    return (
+                      <td key={bid.id} className="p-4 sm:p-5 border-r border-slate-200 last:border-r-0">
+                        <div className="space-y-1.5">
+                          <div
+                            data-testid={`payment-method-${bid.id}`}
+                            className="font-bold text-xs text-slate-900 flex items-center gap-1.5"
+                          >
+                            <span>{paymentLabel}</span>
+                          </div>
+
+                          {isBarter && bid.barterBagsCount && (
+                            <div
+                              data-testid={`barter-badge-${bid.id}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold"
+                            >
+                              <span>[ Negociação Direta: {bid.barterBagsCount} sacas (60kg) ]</span>
+                            </div>
+                          )}
+
+                          {bid.validityHours && (
+                            <div className="text-[11px] text-slate-500 font-medium">
+                              Validade: {bid.validityHours}h
+                            </div>
+                          )}
                         </div>
                       </td>
                     );

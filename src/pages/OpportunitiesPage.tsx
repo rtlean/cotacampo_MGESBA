@@ -366,15 +366,14 @@ export const OpportunitiesPage: React.FC = () => {
 
                     {/* Botão de Envio de Proposta */}
                     <div className="pt-3 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => alert(`Envio de proposta para a cotação #${quote.displayCode || quote.id} estará disponível no fluxo de lances.`)}
+                      <Link
+                        href={`/revenda/cotacoes/${quote.id}/proposta`}
                         data-testid={`btn-propose-${quote.id}`}
                         className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
                       >
-                        <span>Enviar Proposta</span>
+                        <span>Responder Cotação</span>
                         <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      </Link>
                     </div>
                   </div>
                 );

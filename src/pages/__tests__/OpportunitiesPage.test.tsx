@@ -169,12 +169,12 @@ describe('US13 – Mural de Oportunidades (Feed de Cotações)', () => {
       expect(cardSaoMateus).toHaveTextContent('2 itens');
       expect(cardSaoMateus).toHaveTextContent(/Expira em 1[56]h/);
 
-      // Clica em enviar proposta
+      // Verifica link para responder cotação (US14)
       const proposeBtn = screen.getByTestId(`btn-propose-${mockQuotationLinhares.id}`);
-      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-      fireEvent.click(proposeBtn);
-      expect(alertSpy).toHaveBeenCalled();
-      alertSpy.mockRestore();
+      expect(proposeBtn).toHaveAttribute(
+        'href',
+        `/revenda/cotacoes/${mockQuotationLinhares.id}/proposta`
+      );
     });
 
     it('deve lidar com erro de serviço sem quebrar a tela', async () => {

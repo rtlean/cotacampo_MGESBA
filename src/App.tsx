@@ -10,6 +10,7 @@ import { ResellerDashboard } from './pages/ResellerDashboard';
 import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { NewQuotationPage } from './pages/NewQuotationPage';
 import { QuotationComparativePage } from './pages/QuotationComparativePage';
+import { SubmitBidPage } from './pages/SubmitBidPage';
 import { supabase } from './services/supabase';
 
 export const App: React.FC = () => {
@@ -65,6 +66,7 @@ export const App: React.FC = () => {
           <Route path="/produtor/cotacoes/:id/comparativo" component={QuotationComparativePage} />
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
           <Route path="/revenda/oportunidades" component={OpportunitiesPage} />
+          <Route path="/revenda/cotacoes/:id/proposta" component={SubmitBidPage} />
           <Route>
             <Redirect to="/cadastro" />
           </Route>

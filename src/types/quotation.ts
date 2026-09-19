@@ -17,6 +17,8 @@ export interface QuotationItem {
 export interface QuotationRequest {
   id: string;
   producerId: string;
+  producerName?: string;
+  deliveryAddress?: string;
   title: string;
   status: QuotationStatus;
   targetState: SupportedState;
@@ -147,6 +149,8 @@ export interface QuotationBid {
   cashPriceTotal?: number;
   termPriceTotal?: number;
   interestRateMonthly?: number;
+  validityHours?: number;
+  barterBagsCount?: number;
   notes?: string;
   createdAt: string;
 }

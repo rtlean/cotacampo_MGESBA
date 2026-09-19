@@ -101,6 +101,8 @@ export interface QuotationDraft {
   proposalLimitHours?: number;
   title?: string;
   notes?: string;
+  talhaoArea?: number;
+  talhaoSpacing?: number;
   updatedAt?: string;
 }
 

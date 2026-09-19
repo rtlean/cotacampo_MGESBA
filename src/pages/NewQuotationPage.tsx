@@ -20,11 +20,14 @@ import {
   Truck,
   Clock,
   X,
+  Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { TARGET_CROPS } from '../data/target-crops';
 import { searchCatalogProducts, CatalogProduct } from '../data/products';
 import { quotationService } from '../services/quotation.service';
+import { agronomicAiService, PhytosanitaryRestriction } from '../services/agronomic-ai.service';
 import {
   step1DestinationSchema,
   step3CommercialSchema,
@@ -59,6 +62,12 @@ export const NewQuotationPage: React.FC = () => {
   const [itemError, setItemError] = useState<string | null>(null);
   const [step2Error, setStep2Error] = useState<string | null>(null);
 
+  // US11: Assistente IA de Dimensionamento e Recomendação (Copiloto IA)
+  const [talhaoArea, setTalhaoArea] = useState<string>('15');
+  const [talhaoSpacing, setTalhaoSpacing] = useState<string>('3000');
+  const [aiDoseExplanation, setAiDoseExplanation] = useState<string | null>(null);
+  const [aiRestriction, setAiRestriction] = useState<PhytosanitaryRestriction | null>(null);
+
   // Receituário Agronômico
   const [prescription, setPrescription] = useState<RecipeAttachment | null>(null);
   const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
@@ -85,6 +94,8 @@ export const NewQuotationPage: React.FC = () => {
     if (draft) {
       if (draft.farmId) setSelectedFarmId(draft.farmId);
       if (draft.targetCrop) setSelectedCrop(draft.targetCrop);
+      if (draft.talhaoArea !== undefined) setTalhaoArea(String(draft.talhaoArea));
+      if (draft.talhaoSpacing !== undefined) setTalhaoSpacing(String(draft.talhaoSpacing));
       if (draft.items && draft.items.length > 0) setItems(draft.items);
       if (draft.prescription) setPrescription(draft.prescription);
       if (draft.freightType) setFreightType(draft.freightType);
@@ -133,6 +144,17 @@ export const NewQuotationPage: React.FC = () => {
     if (step1Errors.targetCrop) {
       setStep1Errors((prev) => ({ ...prev, targetCrop: undefined }));
     }
+
+    // Se o produtor possuir área previamente cadastrada para a cultura (US01.1), sincroniza
+    const cropDim = producerUser?.cropDimensions?.[cropId];
+    if (cropDim?.area) {
+      setTalhaoArea(String(cropDim.area));
+    }
+    if (cropDim?.plantsCount) {
+      setTalhaoSpacing(String(cropDim.plantsCount));
+    }
+    setAiDoseExplanation(null);
+    setAiRestriction(null);
   };
 
   const handleNextToItems = (e: React.FormEvent) => {
@@ -164,6 +186,8 @@ export const NewQuotationPage: React.FC = () => {
       targetState: selectedFarmObj?.state,
       targetCrop: selectedCrop as TargetCropId,
       targetCropName: selectedCropObj?.name,
+      talhaoArea: parseFloat(talhaoArea.replace(',', '.')) || 15,
+      talhaoSpacing: parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000,
       items,
       prescription: prescription || undefined,
     });
@@ -176,6 +200,11 @@ export const NewQuotationPage: React.FC = () => {
     const query = e.target.value;
     setProductQuery(query);
     setItemError(null);
+    setAiDoseExplanation(null);
+
+    // US11: Verificação preventiva de restrição fitossanitária (Cenário 2)
+    const check = agronomicAiService.checkPhytosanitaryRestrictions(selectedCrop, query);
+    setAiRestriction(check.hasRestriction ? check : null);
 
     if (query.trim().length >= 2) {
       const matches = searchCatalogProducts(query);
@@ -191,6 +220,62 @@ export const NewQuotationPage: React.FC = () => {
     setUnitInput(prod.defaultUnit || 'Kg');
     setProductSuggestions([]);
     setItemError(null);
+    setAiDoseExplanation(null);
+
+    // US11: Verificação preventiva de restrição fitossanitária (Cenário 2)
+    const check = agronomicAiService.checkPhytosanitaryRestrictions(selectedCrop, prod.name);
+    setAiRestriction(check.hasRestriction ? check : null);
+  };
+
+  // US11 - Cenário 1: Cálculo automático de volume por área e cultura
+  const handleCalculateDoseWithAi = () => {
+    const query = productQuery.trim() || selectedProduct?.name || '';
+    if (!query) {
+      setItemError('Informe o produto ou princípio ativo para calcular a dosagem com IA.');
+      return;
+    }
+
+    const area = parseFloat(talhaoArea.replace(',', '.')) || 15;
+    const spacing = parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000;
+
+    const calculation = agronomicAiService.calculateDosage({
+      cropId: selectedCrop,
+      productNameOrActive: query,
+      areaHectares: area,
+      plantsPerHectare: spacing,
+    });
+
+    setQuantityInput(String(calculation.recommendedQuantity));
+    setUnitInput(calculation.recommendedUnit);
+    setAiDoseExplanation(calculation.explanation);
+    setItemError(null);
+  };
+
+  // US11 - Cenário 2: Substituição com 1 clique por alternativa segura recomendada
+  const handleReplaceWithAlternative = () => {
+    if (!aiRestriction?.recommendedAlternative) return;
+
+    const alternative = aiRestriction.recommendedAlternative;
+    setSelectedProduct(alternative);
+    setProductQuery(alternative.name);
+    setUnitInput(alternative.defaultUnit || 'L');
+    setAiRestriction(null);
+    setItemError(null);
+
+    // Recalcula a dosagem automaticamente para o novo produto seguro
+    const area = parseFloat(talhaoArea.replace(',', '.')) || 15;
+    const spacing = parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000;
+
+    const calculation = agronomicAiService.calculateDosage({
+      cropId: selectedCrop,
+      productNameOrActive: alternative.name,
+      areaHectares: area,
+      plantsPerHectare: spacing,
+    });
+
+    setQuantityInput(String(calculation.recommendedQuantity));
+    setUnitInput(calculation.recommendedUnit);
+    setAiDoseExplanation(calculation.explanation);
   };
 
   const handleAddItem = (e: React.MouseEvent) => {
@@ -233,6 +318,8 @@ export const NewQuotationPage: React.FC = () => {
     setQuantityInput('');
     setProductSuggestions([]);
     setAcceptsGeneric(true);
+    setAiDoseExplanation(null);
+    setAiRestriction(null);
 
     // Salva no rascunho
     const draft = quotationService.getDraft() || {};
@@ -722,6 +809,127 @@ export const NewQuotationPage: React.FC = () => {
                 <p className="text-xs text-slate-500 mt-0.5">
                   Busque por marca comercial ou princípio ativo (ex: Mancozeb 750 WG, Glifosato, NPK).
                 </p>
+              </div>
+
+              {/* US11 - Cenário 2: Alerta preventivo de restrição fitossanitária (Mamão / Pimenta) */}
+              {aiRestriction && aiRestriction.hasRestriction && (
+                <div
+                  data-testid="ai-restriction-card"
+                  className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 text-amber-900 shadow-sm animate-fade-in flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-2.5 bg-amber-100 text-amber-800 rounded-xl shrink-0 mt-0.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-700" />
+                    </div>
+                    <div>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-200/70 text-amber-900 uppercase tracking-wider mb-1">
+                        Alerta Fitossanitário • Copiloto IA
+                      </span>
+                      <p className="text-sm font-semibold text-amber-950 leading-relaxed">
+                        {aiRestriction.warningMessage}
+                      </p>
+                      {aiRestriction.recommendedAlternative && (
+                        <p className="text-xs text-amber-800 mt-1.5">
+                          Alternativa em conformidade:{' '}
+                          <strong className="text-amber-950 underline decoration-amber-400">
+                            {aiRestriction.recommendedAlternative.name}
+                          </strong>{' '}
+                          (Princípio Ativo: {aiRestriction.recommendedAlternative.activeIngredient})
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {aiRestriction.recommendedAlternative && (
+                    <button
+                      type="button"
+                      onClick={handleReplaceWithAlternative}
+                      data-testid="btn-ai-replace-item"
+                      className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs shadow-sm transition-all cursor-pointer self-start md:self-auto"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Substituir por Alternativa Recomendada</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* US11 - Cenário 1: Assistente IA de Dimensionamento e Recomendação no Wizard */}
+              <div
+                data-testid="ai-copilot-container"
+                className="bg-gradient-to-br from-emerald-50/80 via-teal-50/50 to-amber-50/40 border border-emerald-200/90 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl bg-emerald-700 text-white shadow-xs shrink-0">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                        <span>Copiloto IA: Dimensionamento & Recomendação</span>
+                        <span className="text-[10px] bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded-full font-semibold">
+                          MAPA Bula Oficial
+                        </span>
+                      </h3>
+                      <p className="text-xs text-emerald-800 mt-0.5">
+                        Cálculo automático de volume exato com base na área e plantas para{' '}
+                        <strong>{selectedCropObj?.name || 'sua Cultura'}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCalculateDoseWithAi}
+                    data-testid="btn-ai-calculate-dose"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-agro-700 to-emerald-700 hover:from-agro-800 hover:to-emerald-800 text-white font-bold text-xs shadow-sm transition-all cursor-pointer shrink-0"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Calcular Dosagem com IA</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-emerald-100">
+                  <div>
+                    <label htmlFor="ai-talhao-area" className="block text-xs font-bold text-emerald-950 mb-1">
+                      Área do Talhão (hectares)
+                    </label>
+                    <input
+                      id="ai-talhao-area"
+                      data-testid="input-ai-area"
+                      type="text"
+                      value={talhaoArea}
+                      onChange={(e) => setTalhaoArea(e.target.value)}
+                      placeholder="Ex: 15"
+                      className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-slate-900 text-xs font-semibold focus:border-agro-600 focus:ring-1 focus:ring-agro-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="ai-talhao-spacing" className="block text-xs font-bold text-emerald-950 mb-1">
+                      Espaçamento / Densidade (plantas/ha)
+                    </label>
+                    <input
+                      id="ai-talhao-spacing"
+                      data-testid="input-ai-spacing"
+                      type="text"
+                      value={talhaoSpacing}
+                      onChange={(e) => setTalhaoSpacing(e.target.value)}
+                      placeholder="Ex: 3000"
+                      className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-slate-900 text-xs font-semibold focus:border-agro-600 focus:ring-1 focus:ring-agro-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                {aiDoseExplanation && (
+                  <div
+                    data-testid="ai-dose-explanation"
+                    className="p-3 bg-emerald-100/90 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fade-in"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span>{aiDoseExplanation}</span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">

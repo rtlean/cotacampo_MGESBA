@@ -18,6 +18,7 @@ export interface QuotationRequest {
   id: string;
   producerId: string;
   producerName?: string;
+  producerPhone?: string;
   deliveryAddress?: string;
   title: string;
   status: QuotationStatus;
@@ -174,4 +175,21 @@ export interface AwardedResellerSummary {
   freightCost: number;
   totalAmount: number;
   whatsAppUrl: string;
+}
+
+export type ResellerFunnelColumn = 'ENVIADAS' | 'GANHAS' | 'PERDIDAS';
+
+export interface ResellerProposalView {
+  bid: QuotationBid;
+  quotation: QuotationRequest;
+  column: ResellerFunnelColumn;
+  producerDisplayName: string;
+  producerDisplayPhone: string;
+  isContactRevealed: boolean;
+  whatsAppUrl?: string;
+  marketIntelligence?: {
+    winningAmount?: number;
+    differencePercent?: number;
+    feedbackMessage: string;
+  };
 }

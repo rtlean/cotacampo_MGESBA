@@ -8,6 +8,8 @@ import {
   QuotationBidItem,
   ComparativeAnalysis,
   AwardedResellerSummary,
+  ResellerProposalView,
+  ResellerFunnelColumn,
 } from '../types/quotation';
 import { ProducerProfile, SupportedState } from '../types/user';
 import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
@@ -855,6 +857,11 @@ export const quotationService = {
       throw new Error(`Proposta com ID ${bidId} não encontrada.`);
     }
 
+    if (quotation) {
+      const otherBids = bids.filter((b) => b.id !== bidId);
+      await this.notifyAwardOutcomes(quotation, winningBid, otherBids);
+    }
+
     return winningBid;
   },
 
@@ -901,6 +908,12 @@ export const quotationService = {
     quotation.status = 'AWARDED';
     quotation.updatedAt = new Date().toISOString();
     await this.saveQuotation(quotation);
+
+    const winningBids = bids.filter((b) => b.items.some((it) => it.isAwarded));
+    const losingBids = bids.filter((b) => !b.items.some((it) => it.isAwarded));
+    for (const won of winningBids) {
+      await this.notifyAwardOutcomes(quotation, won, losingBids);
+    }
 
     return this.getAwardedResellersSummary(quotation, bids);
   },
@@ -1018,5 +1031,406 @@ export const quotationService = {
     }
 
     return newBid;
+  },
+
+  /**
+   * Retorna todas as propostas salvas no cache local
+   */
+  getAllBids(): QuotationBid[] {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(BIDS_STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
+      } catch (e) {
+        console.error('Erro ao ler todas as propostas do localStorage:', e);
+        return [];
+      }
+    }
+    return [];
+  },
+
+  /**
+   * US15 Cenário 2: Emite notificação para a revenda vencedora e revendas concorrentes após aceite
+   */
+  async notifyAwardOutcomes(
+    quotation: QuotationRequest,
+    winningBid: QuotationBid,
+    otherBids: QuotationBid[] = []
+  ): Promise<void> {
+    const formattedAmount = winningBid.totalAmount.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+    });
+    const quoteCode = quotation.displayCode || quotation.id.slice(-6).toUpperCase();
+
+    // 1. Notificação para a revenda vencedora
+    const winningNotification: QuotationNotification = {
+      id: `notif_award_${quotation.id}_${winningBid.resellerId}_${Date.now()}`,
+      quotationId: quotation.id,
+      quotationCode: quoteCode,
+      resellerId: winningBid.resellerId,
+      resellerName: winningBid.resellerTradeName || winningBid.resellerName,
+      targetCity: quotation.targetCity,
+      targetState: quotation.targetState,
+      message: `🎉 Negócio Fechado! Sua proposta de R$ ${formattedAmount} foi aceita pelo produtor ${quotation.producerName || 'Produtor Rural'} na cotação #${quoteCode}.`,
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+        const list: QuotationNotification[] = stored ? JSON.parse(stored) : [];
+        list.unshift(winningNotification);
+        localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.error('Erro ao salvar notificação do vencedor:', e);
+      }
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('quotation_notifications').insert({
+          id: winningNotification.id,
+          quotation_id: winningNotification.quotationId,
+          target_city: winningNotification.targetCity,
+          target_state: winningNotification.targetState,
+          message: winningNotification.message,
+        });
+      } catch (e) {
+        console.warn('Falha ao persistir notificação de vencedor no Supabase:', e);
+      }
+    }
+
+    // 2. Notificações para os concorrentes não selecionados (Cenário 3)
+    for (const b of otherBids) {
+      const losingNotification: QuotationNotification = {
+        id: `notif_lost_${quotation.id}_${b.resellerId}_${Date.now()}_${Math.random()}`,
+        quotationId: quotation.id,
+        quotationCode: quoteCode,
+        resellerId: b.resellerId,
+        resellerName: b.resellerTradeName || b.resellerName,
+        targetCity: quotation.targetCity,
+        targetState: quotation.targetState,
+        message: `Cotação #${quoteCode} - Cotação finalizada. Sua proposta não foi selecionada.`,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      if (typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+          const list: QuotationNotification[] = stored ? JSON.parse(stored) : [];
+          list.unshift(losingNotification);
+          localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(list));
+        } catch (e) {
+          console.error('Erro ao salvar notificação de concorrente:', e);
+        }
+      }
+    }
+  },
+
+  /**
+   * Retorna todas as cotações salvas no cache local
+   */
+  getAllQuotations(): QuotationRequest[] {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
+      } catch (e) {
+        console.error('Erro ao ler todas as cotações do localStorage:', e);
+        return [];
+      }
+    }
+    return [];
+  },
+
+  /**
+   * US15: Carrega as propostas de um revendedor e classifica nas colunas do funil (Enviadas, Ganhas, Perdidas)
+   */
+  async getResellerProposals(resellerId: string): Promise<ResellerProposalView[]> {
+    const quotations: QuotationRequest[] = this.getAllQuotations();
+    const allBids: QuotationBid[] = this.getAllBids();
+
+    const myBids = allBids.filter((b) => b.resellerId === resellerId);
+
+    // Se ainda não houver propostas submetidas para este revendedor, gera propostas demonstrativas
+    if (myBids.length === 0) {
+      return this.generateDemoResellerProposals(resellerId, quotations);
+    }
+
+    const views: ResellerProposalView[] = [];
+
+    for (const bid of myBids) {
+      let quotation = quotations.find((q: QuotationRequest) => q.id === bid.quotationId);
+      if (!quotation) {
+        quotation = {
+          id: bid.quotationId,
+          producerId: 'prod_demo_1',
+          producerName: 'Produtor Rural Demo',
+          producerPhone: '(27) 99876-5432',
+          title: 'Pedido de Insumos Agrícolas',
+          status: 'OPEN',
+          targetCity: bid.resellerCity || 'Linhares',
+          targetState: bid.resellerState || 'ES',
+          deadline: new Date(Date.now() + 86400000).toISOString(),
+          createdAt: bid.createdAt,
+          updatedAt: bid.createdAt,
+        };
+      }
+
+      // Classificação das colunas do Kanban
+      let column: ResellerFunnelColumn;
+      if (
+        bid.status === 'ACCEPTED' ||
+        bid.status === 'PARTIALLY_ACCEPTED' ||
+        (quotation.status === 'AWARDED' && (bid.awardType === 'FULL' || bid.awardType === 'PARTIAL'))
+      ) {
+        column = 'GANHAS';
+      } else if (
+        bid.status === 'REJECTED' ||
+        quotation.status === 'CANCELLED' ||
+        (quotation.status === 'AWARDED' && (bid.status as string) !== 'ACCEPTED' && bid.awardType === 'NONE')
+      ) {
+        column = 'PERDIDAS';
+      } else {
+        column = 'ENVIADAS';
+      }
+
+      // Privacidade de dados (Cenário 1 e Cenário 2)
+      const isContactRevealed = column === 'GANHAS';
+      const rawProducerName = quotation.producerName || 'João Batista da Silva';
+      const rawProducerPhone = quotation.producerPhone || '(27) 99876-5432';
+
+      const producerDisplayName = isContactRevealed
+        ? rawProducerName
+        : 'Produtor Rural (Contato protegido até o aceite)';
+
+      const producerDisplayPhone = isContactRevealed
+        ? rawProducerPhone
+        : '(27) •••••-••••';
+
+      // Link do WhatsApp quando ganha
+      let whatsAppUrl: string | undefined = undefined;
+      if (isContactRevealed) {
+        const cleanPhone = rawProducerPhone.replace(/\D/g, '');
+        const phoneWithCountry = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+        const quoteCode = quotation.displayCode || quotation.id.slice(-6).toUpperCase();
+        const textMsg = `Olá ${rawProducerName}, sou o RTV responsável pela proposta aceita na Cotação #${quoteCode} no CotaCampo. Vamos combinar o faturamento e entrega?`;
+        whatsAppUrl = `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(textMsg)}`;
+      }
+
+      // Inteligência de Mercado para propostas perdidas (Cenário 3)
+      let marketIntelligence: ResellerProposalView['marketIntelligence'] = undefined;
+      if (column === 'PERDIDAS') {
+        const competitorBids = allBids.filter(
+          (b) => b.quotationId === quotation?.id && b.id !== bid.id
+        );
+        const winningCompetitor = competitorBids.find(
+          (b) => b.status === 'ACCEPTED' || b.awardType === 'FULL'
+        );
+
+        if (winningCompetitor && winningCompetitor.totalAmount < bid.totalAmount) {
+          const diffPercent = Math.max(
+            1,
+            Math.round(
+              ((bid.totalAmount - winningCompetitor.totalAmount) / bid.totalAmount) * 100
+            )
+          );
+          marketIntelligence = {
+            winningAmount: winningCompetitor.totalAmount,
+            differencePercent: diffPercent,
+            feedbackMessage: `A proposta vencedora foi ${diffPercent}% mais barata que a sua.`,
+          };
+        } else if (winningCompetitor) {
+          marketIntelligence = {
+            winningAmount: winningCompetitor.totalAmount,
+            feedbackMessage: 'A proposta vencedora apresentou condições logísticas ou prazos mais competitivos.',
+          };
+        } else {
+          marketIntelligence = {
+            feedbackMessage: 'Cotação finalizada. Sua proposta não foi selecionada.',
+          };
+        }
+      }
+
+      views.push({
+        bid,
+        quotation,
+        column,
+        producerDisplayName,
+        producerDisplayPhone,
+        isContactRevealed,
+        whatsAppUrl,
+        marketIntelligence,
+      });
+    }
+
+    return views;
+  },
+
+  /**
+   * Gera propostas de demonstração para alimentar as 3 colunas do funil no primeiro acesso
+   */
+  generateDemoResellerProposals(
+    resellerId: string,
+    existingQuotations: QuotationRequest[]
+  ): ResellerProposalView[] {
+    const q1: QuotationRequest = existingQuotations[0] || {
+      id: 'quote-demo-submitted-1',
+      producerId: 'prod_1',
+      producerName: 'Marcos Vinícius (Fazenda Boa Esperança)',
+      producerPhone: '(27) 99876-1122',
+      title: 'Nutrição Foliar e Fungicidas para Café Conilon',
+      status: 'OPEN',
+      targetCity: 'Linhares',
+      targetState: 'ES',
+      deadline: new Date(Date.now() + 48 * 3600000).toISOString(),
+      displayCode: 'COT-7701',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const q2: QuotationRequest = existingQuotations[1] || {
+      id: 'quote-demo-awarded-2',
+      producerId: 'prod_2',
+      producerName: 'João Batista da Silva (Fazenda Vale do Sol)',
+      producerPhone: '(27) 99811-2233',
+      title: 'Adubação de Cobertura NPK',
+      status: 'AWARDED',
+      targetCity: 'São Mateus',
+      targetState: 'ES',
+      deadline: new Date(Date.now() - 24 * 3600000).toISOString(),
+      displayCode: 'COT-7702',
+      createdAt: new Date(Date.now() - 72 * 3600000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const q3: QuotationRequest = existingQuotations[2] || {
+      id: 'quote-demo-lost-3',
+      producerId: 'prod_3',
+      producerName: 'Carlos Eduardo (Sítio Três Barras)',
+      producerPhone: '(27) 99955-4433',
+      title: 'Herbicidas e Adjuvantes',
+      status: 'AWARDED',
+      targetCity: 'Colatina',
+      targetState: 'ES',
+      deadline: new Date(Date.now() - 48 * 3600000).toISOString(),
+      displayCode: 'COT-7703',
+      createdAt: new Date(Date.now() - 96 * 3600000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const bidSubmitted: QuotationBid = {
+      id: `bid_demo_submitted_${resellerId}`,
+      quotationId: q1.id,
+      resellerId,
+      resellerName: 'AgroVila Insumos',
+      resellerCity: 'Linhares',
+      resellerState: 'ES',
+      items: [
+        {
+          id: 'item_sub_1',
+          productName: 'Fungicida Protetor',
+          brandName: 'Mancozeb WG',
+          unitPrice: 85,
+          totalPrice: 8500,
+        },
+      ],
+      freightCost: 250,
+      deliveryDays: 3,
+      totalAmount: 8750,
+      status: 'SUBMITTED',
+      awardType: 'NONE',
+      paymentMethod: 'CASH',
+      createdAt: new Date().toISOString(),
+    };
+
+    const bidAwarded: QuotationBid = {
+      id: `bid_demo_awarded_${resellerId}`,
+      quotationId: q2.id,
+      resellerId,
+      resellerName: 'AgroVila Insumos',
+      resellerCity: 'Linhares',
+      resellerState: 'ES',
+      items: [
+        {
+          id: 'item_awd_1',
+          productName: 'Adubo NPK 20-05-20',
+          brandName: 'Adubo NPK Especial',
+          unitPrice: 130,
+          totalPrice: 13000,
+          isAwarded: true,
+        },
+      ],
+      freightCost: 400,
+      deliveryDays: 2,
+      totalAmount: 13400,
+      status: 'ACCEPTED',
+      awardType: 'FULL',
+      paymentMethod: 'TERM_HARVEST',
+      createdAt: new Date(Date.now() - 36 * 3600000).toISOString(),
+    };
+
+    const bidLost: QuotationBid = {
+      id: `bid_demo_lost_${resellerId}`,
+      quotationId: q3.id,
+      resellerId,
+      resellerName: 'AgroVila Insumos',
+      resellerCity: 'Linhares',
+      resellerState: 'ES',
+      items: [
+        {
+          id: 'item_lost_1',
+          productName: 'Glifosato 480 SL',
+          brandName: 'Glifosato Padrão',
+          unitPrice: 38,
+          totalPrice: 9500,
+          isAwarded: false,
+        },
+      ],
+      freightCost: 350,
+      deliveryDays: 4,
+      totalAmount: 9850,
+      status: 'REJECTED',
+      awardType: 'NONE',
+      paymentMethod: 'CASH',
+      createdAt: new Date(Date.now() - 72 * 3600000).toISOString(),
+    };
+
+    return [
+      {
+        bid: bidSubmitted,
+        quotation: q1,
+        column: 'ENVIADAS',
+        producerDisplayName: 'Produtor Rural (Contato protegido até o aceite)',
+        producerDisplayPhone: '(27) •••••-••••',
+        isContactRevealed: false,
+      },
+      {
+        bid: bidAwarded,
+        quotation: q2,
+        column: 'GANHAS',
+        producerDisplayName: q2.producerName || 'João Batista da Silva',
+        producerDisplayPhone: q2.producerPhone || '(27) 99811-2233',
+        isContactRevealed: true,
+        whatsAppUrl: `https://wa.me/5527998112233?text=${encodeURIComponent(
+          `Olá ${q2.producerName}, sou o RTV responsável pela proposta aceita na Cotação #${q2.displayCode} no CotaCampo. Vamos combinar o faturamento e entrega?`
+        )}`,
+      },
+      {
+        bid: bidLost,
+        quotation: q3,
+        column: 'PERDIDAS',
+        producerDisplayName: 'Produtor Rural (Contato protegido até o aceite)',
+        producerDisplayPhone: '(27) •••••-••••',
+        isContactRevealed: false,
+        marketIntelligence: {
+          winningAmount: 9357.5,
+          differencePercent: 5,
+          feedbackMessage: 'A proposta vencedora foi 5% mais barata que a sua.',
+        },
+      },
+    ];
   },
 };

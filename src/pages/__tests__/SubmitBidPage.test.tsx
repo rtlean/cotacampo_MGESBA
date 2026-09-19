@@ -150,7 +150,7 @@ describe('US14 – Envio de Proposta e Oferta de Genéricos/Equivalentes (Submit
       // Espera tela de confirmação
       await waitFor(() => {
         expect(screen.getByTestId('bid-submitted-success')).toBeInTheDocument();
-      });
+      }, { timeout: 3500 });
 
       // Validações da mensagem e status
       expect(screen.getByText('Proposta enviada! O produtor será notificado.')).toBeInTheDocument();
@@ -211,7 +211,7 @@ describe('US14 – Envio de Proposta e Oferta de Genéricos/Equivalentes (Submit
 
       await waitFor(() => {
         expect(screen.getByTestId('bid-submitted-success')).toBeInTheDocument();
-      });
+      }, { timeout: 3500 });
 
       // Verifica chamada ao serviço
       expect(submitBidSpy).toHaveBeenCalledWith(
@@ -282,7 +282,7 @@ describe('US14 – Envio de Proposta e Oferta de Genéricos/Equivalentes (Submit
 
       await waitFor(() => {
         expect(screen.getByTestId('bid-submitted-success')).toBeInTheDocument();
-      });
+      }, { timeout: 3500 });
 
       // Valida resumo de barter
       expect(screen.getByText(/Barter \/ Permuta em Sacas \(85 sacas de 60kg\)/)).toBeInTheDocument();

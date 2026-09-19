@@ -547,6 +547,301 @@ describe('Quotation Service', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe('US09 - Análise Comparativa Equalizada (Bids & Comparative Analysis)', () => {
+    const mockQuote: QuotationRequest = {
+      id: 'quote-comp-100',
+      producerId: 'prod-test-uuid-123',
+      title: 'Insumos Café Conilon Linhares',
+      status: 'OPEN',
+      targetState: 'ES',
+      targetCity: 'Linhares',
+      deadline: new Date(Date.now() + 86400000).toISOString(),
+      displayCode: 'COT-001',
+      items: [
+        {
+          id: 'item-1',
+          productName: 'Fungicida Dithane NT',
+          activeIngredient: 'Mancozebe',
+          quantity: 50,
+          unit: 'Kg',
+          acceptsGeneric: true,
+        },
+        {
+          id: 'item-2',
+          productName: 'Adubo NPK 20-05-20',
+          activeIngredient: 'NPK',
+          quantity: 1000,
+          unit: 'Kg',
+          acceptsGeneric: false,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    it('getQuotationById: deve retornar cotação pelo ID a partir do localStorage', async () => {
+      localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+
+      const found = await quotationService.getQuotationById('quote-comp-100');
+      expect(found).not.toBeNull();
+      expect(found?.id).toBe('quote-comp-100');
+      expect(found?.title).toBe('Insumos Café Conilon Linhares');
+
+      // ID inexistente
+      const notFound = await quotationService.getQuotationById('non-existent');
+      expect(notFound).toBeNull();
+
+      // ID vazio
+      const empty = await quotationService.getQuotationById('');
+      expect(empty).toBeNull();
+    });
+
+    it('getQuotationById: deve tratar erro ao ler localStorage ou falha no parsing', async () => {
+      localStorage.setItem('cotacampo_quotations', 'invalid-json{');
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await quotationService.getQuotationById('any-id');
+      expect(result).toBeNull();
+      consoleSpy.mockRestore();
+    });
+
+    it('getQuotationById: deve buscar do Supabase se não encontrar no cache local', async () => {
+      localStorage.removeItem('cotacampo_quotations');
+
+      vi.spyOn(supabase, 'from').mockReturnValueOnce({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValueOnce({
+          data: {
+            id: 'quote-remote-99',
+            producer_id: 'prod-99',
+            title: 'Cotação Remota',
+            status: 'OPEN',
+            target_state: 'ES',
+            target_city: 'Linhares',
+            deadline: new Date().toISOString(),
+            freight_type: 'CIF',
+            payment_terms: '30 dias',
+            proposal_limit_hours: 48,
+            notes: 'Observações remotas',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            quotation_items: [
+              {
+                id: 'it-rem-1',
+                product_name: 'Ureia Agrícola',
+                active_ingredient: 'Nitrogênio',
+                quantity: 500,
+                unit: 'Kg',
+                accepts_generic: true,
+              },
+            ],
+            quotation_bids: [
+              {
+                id: 'bid-rem-1',
+                total_amount: 1500,
+                freight_cost: 100,
+                delivery_days: 3,
+                status: 'SUBMITTED',
+              },
+            ],
+          },
+          error: null,
+        }),
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const remoteQuote = await quotationService.getQuotationById('quote-remote-99');
+      expect(remoteQuote).not.toBeNull();
+      expect(remoteQuote?.id).toBe('quote-remote-99');
+      expect(remoteQuote?.items?.length).toBe(1);
+      expect(remoteQuote?.items?.[0].productName).toBe('Ureia Agrícola');
+      expect(remoteQuote?.items?.[0].acceptsGeneric).toBe(true);
+    });
+
+    it('getQuotationById: deve capturar exceção de rede do Supabase e retornar null', async () => {
+      localStorage.removeItem('cotacampo_quotations');
+
+      vi.spyOn(supabase, 'from').mockReturnValueOnce({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockRejectedValueOnce(new Error('Supabase network crash')),
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = await quotationService.getQuotationById('quote-crash');
+      expect(result).toBeNull();
+      warnSpy.mockRestore();
+    });
+
+    it('seedDemoBidsForQuotation: deve gerar propostas com Melhor Preço, Entrega Mais Rápida e Equivalente Ofertado', () => {
+      const demoBids = quotationService.seedDemoBidsForQuotation(mockQuote);
+
+      expect(demoBids.length).toBe(2);
+
+      const [reseller1, reseller2] = demoBids;
+      expect(reseller1.resellerTradeName).toBe('AgroCenter Linhares');
+      expect(reseller1.deliveryDays).toBe(2); // Entrega Mais Rápida
+      expect(reseller1.freightCost).toBe(150.00);
+
+      expect(reseller2.resellerTradeName).toBe('Café & Campo Insumos');
+      expect(reseller2.deliveryDays).toBe(5);
+      expect(reseller2.freightCost).toBe(0.00); // Frete Grátis
+      expect(reseller2.totalAmount).toBeLessThan(reseller1.totalAmount); // Melhor Preço Global
+
+      // Item 1 aceita genérico: reseller2 deve ofertar equivalente com concentração
+      const equivalentItem = reseller2.items[0];
+      expect(equivalentItem.isEquivalent).toBe(true);
+      expect(equivalentItem.brandName).toBe('Manzate 750 WG (UPL)');
+      expect(equivalentItem.activeIngredientConcentration).toBe('Mancozebe 750 g/kg (75% m/m)');
+
+      // Item 2 não aceita genérico: ambos devem ofertar o produto solicitado
+      expect(reseller1.items[1].isEquivalent).toBe(false);
+      expect(reseller2.items[1].isEquivalent).toBe(false);
+    });
+
+    it('seedDemoBidsForQuotation: deve usar itens padrão caso a cotação não tenha items definidos', () => {
+      const emptyQuote: QuotationRequest = {
+        ...mockQuote,
+        items: undefined,
+      };
+
+      const demoBids = quotationService.seedDemoBidsForQuotation(emptyQuote);
+      expect(demoBids.length).toBe(2);
+      expect(demoBids[0].items.length).toBe(2);
+    });
+
+    it('getQuotationBids: deve retornar propostas do localStorage se já existirem', async () => {
+      const testBids = quotationService.seedDemoBidsForQuotation(mockQuote);
+      localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(testBids));
+
+      const retrieved = await quotationService.getQuotationBids(mockQuote.id);
+      expect(retrieved.length).toBe(2);
+      expect(retrieved[0].id).toBe(testBids[0].id);
+
+      // quotationId vazio
+      expect(await quotationService.getQuotationBids('')).toEqual([]);
+    });
+
+    it('getQuotationBids: deve gerar e salvar seed demo se não houver bids para a cotação', async () => {
+      localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+      localStorage.removeItem('cotacampo_quotation_bids');
+
+      const bids = await quotationService.getQuotationBids(mockQuote.id);
+      expect(bids.length).toBe(2);
+
+      // Deve ter persistido no localStorage
+      const stored = JSON.parse(localStorage.getItem('cotacampo_quotation_bids') || '[]');
+      expect(stored.length).toBe(2);
+    });
+
+    it('getQuotationBids: deve tratar erro ao ler localStorage', async () => {
+      localStorage.setItem('cotacampo_quotation_bids', 'corrupted-json{');
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const bids = await quotationService.getQuotationBids('some-id');
+      expect(bids).toEqual([]);
+      consoleSpy.mockRestore();
+    });
+
+    it('saveBid: deve salvar e atualizar propostas no cache local e no Supabase', async () => {
+      const [bid1] = quotationService.seedDemoBidsForQuotation(mockQuote);
+
+      // Inserção
+      await quotationService.saveBid(bid1);
+      let list = JSON.parse(localStorage.getItem('cotacampo_quotation_bids') || '[]');
+      expect(list.length).toBe(1);
+      expect(list[0].id).toBe(bid1.id);
+
+      // Atualização
+      const updatedBid = { ...bid1, totalAmount: 999.50 };
+      await quotationService.saveBid(updatedBid);
+      list = JSON.parse(localStorage.getItem('cotacampo_quotation_bids') || '[]');
+      expect(list.length).toBe(1);
+      expect(list[0].totalAmount).toBe(999.50);
+
+      // Tratamento de erro no localStorage
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new Error('Quota exceeded');
+      });
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await quotationService.saveBid(bid1);
+      expect(consoleSpy).toHaveBeenCalledWith('Erro ao salvar bid no localStorage:', expect.any(Error));
+      setItemSpy.mockRestore();
+      consoleSpy.mockRestore();
+    });
+
+    it('saveBid: deve sincronizar com Supabase se configurado', async () => {
+      const [bid1] = quotationService.seedDemoBidsForQuotation(mockQuote);
+
+      const upsertMock = vi.fn().mockResolvedValue({ data: null, error: null });
+      vi.spyOn(supabase, 'from').mockReturnValue({
+        upsert: upsertMock,
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      await quotationService.saveBid(bid1);
+      expect(upsertMock).toHaveBeenCalled();
+
+      // Tratamento de falha no Supabase
+      vi.spyOn(supabase, 'from').mockReturnValueOnce({
+        upsert: vi.fn().mockRejectedValueOnce(new Error('DB upsert error')),
+      } as unknown as ReturnType<typeof supabase.from>);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await quotationService.saveBid(bid1);
+      expect(warnSpy).toHaveBeenCalledWith('Erro ao sincronizar bid com Supabase:', expect.any(Error));
+      warnSpy.mockRestore();
+    });
+
+    it('calculateComparativeAnalysis: deve identificar corretamente Melhor Preço Global e Entrega Mais Rápida', () => {
+      const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+      const analysis = quotationService.calculateComparativeAnalysis(mockQuote, bids);
+
+      // Menor totalAmount deve ser Café & Campo (reseller 2)
+      expect(analysis.bestPriceBidId).toBe(bids[1].id);
+
+      // Menor deliveryDays deve ser AgroCenter (reseller 1)
+      expect(analysis.fastestDeliveryBidId).toBe(bids[0].id);
+
+      // Caso com lista vazia
+      const emptyAnalysis = quotationService.calculateComparativeAnalysis(mockQuote, []);
+      expect(emptyAnalysis.bestPriceBidId).toBeNull();
+      expect(emptyAnalysis.fastestDeliveryBidId).toBeNull();
+    });
+
+    it('calculateComparativeAnalysis: revenda com menor preço e menor prazo deve receber ambos os destaques', () => {
+      const singleSuperBid = {
+        ...quotationService.seedDemoBidsForQuotation(mockQuote)[0],
+        id: 'super-bid-1',
+        totalAmount: 500,
+        deliveryDays: 1,
+      };
+      const regularBid = {
+        ...quotationService.seedDemoBidsForQuotation(mockQuote)[1],
+        id: 'regular-bid-2',
+        totalAmount: 1200,
+        deliveryDays: 7,
+      };
+
+      const analysis = quotationService.calculateComparativeAnalysis(mockQuote, [singleSuperBid, regularBid]);
+      expect(analysis.bestPriceBidId).toBe('super-bid-1');
+      expect(analysis.fastestDeliveryBidId).toBe('super-bid-1');
+    });
+
+    it('acceptBid: deve marcar a proposta como ACCEPTED, as outras como REJECTED e cotação como AWARDED', async () => {
+      localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+      const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+      localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+      await quotationService.acceptBid(mockQuote.id, bids[0].id);
+
+      const updatedBids: typeof bids = JSON.parse(localStorage.getItem('cotacampo_quotation_bids') || '[]');
+      expect(updatedBids.find((b) => b.id === bids[0].id)?.status).toBe('ACCEPTED');
+      expect(updatedBids.find((b) => b.id === bids[1].id)?.status).toBe('REJECTED');
+
+      const updatedQuote = await quotationService.getQuotationById(mockQuote.id);
+      expect(updatedQuote?.status).toBe('AWARDED');
+    });
+  });
 });
 
 

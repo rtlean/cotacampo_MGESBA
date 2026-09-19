@@ -494,8 +494,15 @@ export const ProducerDashboard: React.FC = () => {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <Link
+                        href={`/produtor/cotacoes/${quote.id}/comparativo`}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold shadow-xs hover:shadow transition-all"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-harvest-400" />
+                        <span>Comparar Propostas</span>
+                      </Link>
+                      <Link
                         href={`/produtor/cotacoes/${quote.id}`}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
                       >
                         <span>Ver Detalhes</span>
                         <ArrowRight className="w-3.5 h-3.5 text-slate-400" />

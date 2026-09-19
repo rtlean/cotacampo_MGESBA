@@ -1,4 +1,13 @@
-import { ProducerFarm, QuotationDraft, QuotationMetrics, QuotationNotification, QuotationRequest } from '../types/quotation';
+import {
+  ProducerFarm,
+  QuotationDraft,
+  QuotationMetrics,
+  QuotationNotification,
+  QuotationRequest,
+  QuotationBid,
+  QuotationBidItem,
+  ComparativeAnalysis,
+} from '../types/quotation';
 import { ProducerProfile } from '../types/user';
 import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
 import { supabase, isSupabaseConfigured } from './supabase';
@@ -7,6 +16,7 @@ const LOCAL_STORAGE_KEY = 'cotacampo_quotations';
 const DRAFT_STORAGE_KEY = 'cotacampo_quotation_draft';
 const FLASH_MESSAGE_KEY = 'cotacampo_flash_message';
 const NOTIFICATIONS_STORAGE_KEY = 'cotacampo_quotation_notifications';
+const BIDS_STORAGE_KEY = 'cotacampo_quotation_bids';
 
 export const quotationService = {
   /**
@@ -393,5 +403,354 @@ export const quotationService = {
     this.setFlashMessage(`Cotação #${displayCode} publicada com sucesso!`);
 
     return newQuotation;
+  },
+
+  /**
+   * Busca uma cotação pelo ID (local + Supabase)
+   */
+  async getQuotationById(id: string): Promise<QuotationRequest | null> {
+    if (!id) return null;
+
+    // 1. Verificar cache local
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (stored) {
+          const list: QuotationRequest[] = JSON.parse(stored);
+          const found = list.find((q) => q.id === id);
+          if (found) return found;
+        }
+      } catch (e) {
+        console.error('Erro ao ler cotação do localStorage:', e);
+      }
+    }
+
+    // 2. Verificar Supabase se configurado
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('quotation_requests')
+          .select(`
+            id,
+            producer_id,
+            title,
+            status,
+            target_state,
+            target_city,
+            deadline,
+            freight_type,
+            payment_terms,
+            proposal_limit_hours,
+            notes,
+            created_at,
+            updated_at,
+            quotation_items (id, category_id, product_name, active_ingredient, quantity, unit, accepts_generic),
+            quotation_bids (id, total_amount, freight_cost, status, delivery_days)
+          `)
+          .eq('id', id)
+          .single();
+
+        if (data && !error) {
+          const rawItems = (data.quotation_items as Array<Record<string, unknown>>) || [];
+          const rawBids = (data.quotation_bids as Array<Record<string, unknown>>) || [];
+
+          return {
+            id: String(data.id),
+            producerId: String(data.producer_id),
+            title: String(data.title),
+            status: data.status as QuotationRequest['status'],
+            targetState: data.target_state as QuotationRequest['targetState'],
+            targetCity: String(data.target_city),
+            deadline: String(data.deadline),
+            freightType: data.freight_type as QuotationRequest['freightType'],
+            paymentTerms: data.payment_terms ? String(data.payment_terms) : undefined,
+            proposalLimitHours: typeof data.proposal_limit_hours === 'number' ? data.proposal_limit_hours : undefined,
+            notes: data.notes ? String(data.notes) : undefined,
+            items: rawItems.map((it) => ({
+              id: String(it.id),
+              quotationId: String(data.id),
+              categoryId: it.category_id ? String(it.category_id) : undefined,
+              productName: String(it.product_name),
+              activeIngredient: it.active_ingredient ? String(it.active_ingredient) : undefined,
+              quantity: Number(it.quantity) || 1,
+              unit: String(it.unit),
+              acceptsGeneric: Boolean(it.accepts_generic),
+            })),
+            itemsCount: rawItems.length,
+            bidsCount: rawBids.length,
+            createdAt: String(data.created_at),
+            updatedAt: String(data.updated_at),
+          };
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar cotação remota:', err);
+      }
+    }
+
+    return null;
+  },
+
+  /**
+   * Recupera todas as propostas/bids de uma cotação (localStorage + Supabase)
+   */
+  async getQuotationBids(quotationId: string): Promise<QuotationBid[]> {
+    if (!quotationId) return [];
+
+    let bids: QuotationBid[] = [];
+
+    // 1. Tentar ler do localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(BIDS_STORAGE_KEY);
+        if (stored) {
+          const allBids: QuotationBid[] = JSON.parse(stored);
+          bids = allBids.filter((b) => b.quotationId === quotationId);
+        }
+      } catch (e) {
+        console.error('Erro ao ler bids do localStorage:', e);
+      }
+    }
+
+    // Se já existem propostas cadastradas para esta cotação, retorna elas
+    if (bids.length > 0) {
+      return bids;
+    }
+
+    // 2. Se não há propostas no localStorage, tenta buscar a cotação para verificar se podemos gerar seed demo
+    const quotation = await this.getQuotationById(quotationId);
+    if (quotation) {
+      const demoBids = this.seedDemoBidsForQuotation(quotation);
+      if (demoBids.length > 0) {
+        for (const db of demoBids) {
+          await this.saveBid(db);
+        }
+        return demoBids;
+      }
+    }
+
+    return [];
+  },
+
+  /**
+   * Gera propostas de demonstração para a cotação com revendas locais (Linhares, Colatina)
+   * Cenário 1: 2+ revendas com preços, frete discriminado e prazos distintos
+   * Cenário 2: Oferta de produto equivalente para itens com "acceptsGeneric: true"
+   */
+  seedDemoBidsForQuotation(quotation: QuotationRequest): QuotationBid[] {
+    const items = quotation.items && quotation.items.length > 0
+      ? quotation.items
+      : [
+          {
+            id: 'item_default_1',
+            productName: 'Fungicida Dithane NT',
+            activeIngredient: 'Mancozebe',
+            quantity: 50,
+            unit: 'Kg',
+            acceptsGeneric: true,
+          },
+          {
+            id: 'item_default_2',
+            productName: 'Adubo NPK 20-05-20',
+            activeIngredient: 'Nitrogênio, Fósforo, Potássio',
+            quantity: 2000,
+            unit: 'Kg',
+            acceptsGeneric: false,
+          },
+        ];
+
+    // Revenda 1: AgroCenter Linhares (Entrega mais rápida: 2 dias, mas frete e preços unitários padrão)
+    const bid1Items: QuotationBidItem[] = items.map((it, idx) => {
+      const basePrice = idx === 0 ? 82.50 : 3.80;
+      const unitPrice = basePrice;
+      return {
+        id: `bid_item_1_${idx + 1}`,
+        quotationItemId: it.id,
+        productName: it.productName,
+        brandName: it.productName,
+        unitPrice,
+        totalPrice: Number((unitPrice * it.quantity).toFixed(2)),
+        isEquivalent: false,
+        activeIngredientConcentration: it.activeIngredient ? `${it.activeIngredient} Concentrado Padrão` : undefined,
+      };
+    });
+    const subtotal1 = bid1Items.reduce((acc, it) => acc + it.totalPrice, 0);
+    const freight1 = 150.00;
+    const total1 = Number((subtotal1 + freight1).toFixed(2));
+
+    const bid1: QuotationBid = {
+      id: `bid_${quotation.id}_reseller_1`,
+      quotationId: quotation.id,
+      resellerId: 'reseller_agrocenter_linhares',
+      resellerName: 'AgroCenter Comércio de Insumos Agrícolas Ltda',
+      resellerTradeName: 'AgroCenter Linhares',
+      resellerCity: 'Linhares',
+      resellerState: 'ES',
+      items: bid1Items,
+      freightCost: freight1,
+      deliveryDays: 2, // Entrega Mais Rápida
+      totalAmount: total1,
+      status: 'SUBMITTED',
+      notes: 'Entrega imediata em Linhares e região com frota própria.',
+      createdAt: new Date(Date.now() - 3600 * 1000 * 4).toISOString(),
+    };
+
+    // Revenda 2: Café & Campo Insumos (Melhor Preço Global: preços mais baixos, frete grátis, 5 dias, e oferece produto equivalente se aceitar genérico)
+    const bid2Items: QuotationBidItem[] = items.map((it, idx) => {
+      if (it.acceptsGeneric) {
+        // Cenário 2: Produto equivalente ofertado com auditoria do princípio ativo
+        const unitPrice = idx === 0 ? 69.90 : 3.40;
+        return {
+          id: `bid_item_2_${idx + 1}`,
+          quotationItemId: it.id,
+          productName: it.productName,
+          brandName: 'Manzate 750 WG (UPL)',
+          unitPrice,
+          totalPrice: Number((unitPrice * it.quantity).toFixed(2)),
+          isEquivalent: true,
+          activeIngredientConcentration: 'Mancozebe 750 g/kg (75% m/m)',
+          notes: 'Produto equivalente registrado no MAPA com idêntica eficácia agronômica.',
+        };
+      }
+      const unitPrice = idx === 0 ? 76.00 : 3.50;
+      return {
+        id: `bid_item_2_${idx + 1}`,
+        quotationItemId: it.id,
+        productName: it.productName,
+        brandName: it.productName,
+        unitPrice,
+        totalPrice: Number((unitPrice * it.quantity).toFixed(2)),
+        isEquivalent: false,
+      };
+    });
+    const subtotal2 = bid2Items.reduce((acc, it) => acc + it.totalPrice, 0);
+    const freight2 = 0.00; // Frete Grátis
+    const total2 = Number((subtotal2 + freight2).toFixed(2));
+
+    const bid2: QuotationBid = {
+      id: `bid_${quotation.id}_reseller_2`,
+      quotationId: quotation.id,
+      resellerId: 'reseller_cafe_campo',
+      resellerName: 'Café & Campo Distribuidora Agropecuária Ltda',
+      resellerTradeName: 'Café & Campo Insumos',
+      resellerCity: 'Colatina',
+      resellerState: 'ES',
+      items: bid2Items,
+      freightCost: freight2,
+      deliveryDays: 5,
+      totalAmount: total2, // Menor Preço Global
+      status: 'SUBMITTED',
+      notes: 'Frete cortesia para pedidos de lote completo. Pagamento 30/60 dias.',
+      createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+    };
+
+    return [bid1, bid2];
+  },
+
+  /**
+   * Salva ou atualiza uma proposta (bid) no cache local e no Supabase
+   */
+  async saveBid(bid: QuotationBid): Promise<void> {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(BIDS_STORAGE_KEY);
+        let list: QuotationBid[] = stored ? JSON.parse(stored) : [];
+        const index = list.findIndex((b) => b.id === bid.id);
+        if (index >= 0) {
+          list[index] = bid;
+        } else {
+          list.push(bid);
+        }
+        localStorage.setItem(BIDS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.error('Erro ao salvar bid no localStorage:', e);
+      }
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('quotation_bids').upsert({
+          id: bid.id,
+          quotation_id: bid.quotationId,
+          reseller_id: bid.resellerId,
+          total_amount: bid.totalAmount,
+          freight_cost: bid.freightCost,
+          delivery_days: bid.deliveryDays,
+          status: bid.status,
+          notes: bid.notes,
+        });
+
+        if (bid.items && bid.items.length > 0) {
+          for (const item of bid.items) {
+            await supabase.from('quotation_bid_items').upsert({
+              id: item.id,
+              bid_id: bid.id,
+              quotation_item_id: item.quotationItemId,
+              product_name: item.productName,
+              brand_name: item.brandName,
+              unit_price: item.unitPrice,
+              total_price: item.totalPrice,
+              is_equivalent: item.isEquivalent,
+              active_ingredient_concentration: item.activeIngredientConcentration,
+              notes: item.notes,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao sincronizar bid com Supabase:', err);
+      }
+    }
+  },
+
+  /**
+   * Calcula a análise equalizada identificando os badges de inteligência:
+   * - Menor Preço Global (menor totalAmount)
+   * - Entrega Mais Rápida (menor deliveryDays)
+   */
+  calculateComparativeAnalysis(quotation: QuotationRequest, bids: QuotationBid[]): ComparativeAnalysis {
+    if (!bids || bids.length === 0) {
+      return {
+        quotation,
+        bids: [],
+        bestPriceBidId: null,
+        fastestDeliveryBidId: null,
+      };
+    }
+
+    // Menor total somado
+    const minAmount = Math.min(...bids.map((b) => b.totalAmount));
+    const bestPriceBid = bids.find((b) => b.totalAmount === minAmount);
+
+    // Menor prazo de entrega em dias
+    const minDays = Math.min(...bids.map((b) => b.deliveryDays));
+    const fastestDeliveryBid = bids.find((b) => b.deliveryDays === minDays);
+
+    return {
+      quotation,
+      bids,
+      bestPriceBidId: bestPriceBid ? bestPriceBid.id : null,
+      fastestDeliveryBidId: fastestDeliveryBid ? fastestDeliveryBid.id : null,
+    };
+  },
+
+  /**
+   * Aceita uma proposta vencedora, atualiza os status e salva no banco/local
+   */
+  async acceptBid(quotationId: string, acceptedBidId: string): Promise<void> {
+    const bids = await this.getQuotationBids(quotationId);
+    for (const b of bids) {
+      if (b.id === acceptedBidId) {
+        b.status = 'ACCEPTED';
+      } else {
+        b.status = 'REJECTED';
+      }
+      await this.saveBid(b);
+    }
+
+    const quotation = await this.getQuotationById(quotationId);
+    if (quotation) {
+      quotation.status = 'AWARDED';
+      quotation.updatedAt = new Date().toISOString();
+      await this.saveQuotation(quotation);
+    }
   },
 };

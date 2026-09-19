@@ -109,4 +109,16 @@ describe('App - Roteamento Global e Redirecionamento de Recuperação por E-mail
       expect(screen.getByRole('heading', { name: /Nova Cotação de Insumos/i })).toBeInTheDocument();
     });
   });
+
+  it('deve renderizar QuotationComparativePage na rota /produtor/cotacoes/:id/comparativo', async () => {
+    window.history.pushState({}, '', '/produtor/cotacoes/test-quote-app/comparativo');
+    renderApp();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Equalizando propostas/i) ||
+        screen.getByRole('heading', { name: /Análise Comparativa Equalizada/i })
+      ).toBeInTheDocument();
+    });
+  });
 });

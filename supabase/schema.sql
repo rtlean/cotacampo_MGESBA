@@ -157,12 +157,27 @@ CREATE TABLE quotation_bids (
     quotation_id UUID NOT NULL REFERENCES quotation_requests(id) ON DELETE CASCADE,
     reseller_id UUID NOT NULL REFERENCES resellers(id) ON DELETE RESTRICT,
     total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount > 0),
+    freight_cost NUMERIC(12, 2) DEFAULT 0.00 CHECK (freight_cost >= 0),
     status VARCHAR(30) DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED', 'ACCEPTED', 'REJECTED')),
-    delivery_days INTEGER NOT NULL,
+    delivery_days INTEGER NOT NULL CHECK (delivery_days >= 0),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (quotation_id, reseller_id)
+);
+
+CREATE TABLE quotation_bid_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bid_id UUID NOT NULL REFERENCES quotation_bids(id) ON DELETE CASCADE,
+    quotation_item_id UUID REFERENCES quotation_items(id) ON DELETE CASCADE,
+    product_name VARCHAR(255) NOT NULL,
+    brand_name VARCHAR(255) NOT NULL,
+    unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
+    total_price NUMERIC(12, 2) NOT NULL CHECK (total_price >= 0),
+    is_equivalent BOOLEAN DEFAULT false,
+    active_ingredient_concentration VARCHAR(255),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE quotation_notifications (
@@ -261,6 +276,14 @@ CREATE POLICY "Leitura de lances da cotacao" ON quotation_bids FOR SELECT USING 
 
 DROP POLICY IF EXISTS "Insercao de lances da cotacao" ON quotation_bids;
 CREATE POLICY "Insercao de lances da cotacao" ON quotation_bids FOR INSERT WITH CHECK (true);
+
+-- Políticas para Itens do Lance
+ALTER TABLE quotation_bid_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Leitura de itens do lance" ON quotation_bid_items;
+CREATE POLICY "Leitura de itens do lance" ON quotation_bid_items FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Insercao de itens do lance" ON quotation_bid_items;
+CREATE POLICY "Insercao de itens do lance" ON quotation_bid_items FOR INSERT WITH CHECK (true);
 
 -- Políticas para Notificações de Cotações
 ALTER TABLE quotation_notifications ENABLE ROW LEVEL SECURITY;

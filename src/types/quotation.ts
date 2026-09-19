@@ -104,3 +104,39 @@ export interface QuotationDraft {
   updatedAt?: string;
 }
 
+export interface QuotationBidItem {
+  id: string;
+  bidId?: string;
+  quotationItemId?: string;
+  productName: string;
+  brandName: string;
+  unitPrice: number;
+  totalPrice: number;
+  isEquivalent?: boolean;
+  activeIngredientConcentration?: string;
+  notes?: string;
+}
+
+export interface QuotationBid {
+  id: string;
+  quotationId: string;
+  resellerId: string;
+  resellerName: string;
+  resellerTradeName?: string;
+  resellerCity: string;
+  resellerState: SupportedState;
+  items: QuotationBidItem[];
+  freightCost: number;
+  deliveryDays: number;
+  totalAmount: number;
+  status: 'SUBMITTED' | 'ACCEPTED' | 'REJECTED';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface ComparativeAnalysis {
+  quotation: QuotationRequest;
+  bids: QuotationBid[];
+  bestPriceBidId: string | null;
+  fastestDeliveryBidId: string | null;
+}

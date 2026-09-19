@@ -7,6 +7,7 @@ import {
   QuotationBid,
   QuotationBidItem,
   ComparativeAnalysis,
+  AwardedResellerSummary,
 } from '../types/quotation';
 import { ProducerProfile } from '../types/user';
 import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
@@ -585,11 +586,14 @@ export const quotationService = {
       resellerTradeName: 'AgroCenter Linhares',
       resellerCity: 'Linhares',
       resellerState: 'ES',
+      rtvName: 'Carlos Eduardo Mendes',
+      rtvPhone: '27998887711',
       items: bid1Items,
       freightCost: freight1,
       deliveryDays: 2, // Entrega Mais Rápida
       totalAmount: total1,
       status: 'SUBMITTED',
+      awardType: 'NONE',
       notes: 'Entrega imediata em Linhares e região com frota própria.',
       createdAt: new Date(Date.now() - 3600 * 1000 * 4).toISOString(),
     };
@@ -634,11 +638,14 @@ export const quotationService = {
       resellerTradeName: 'Café & Campo Insumos',
       resellerCity: 'Colatina',
       resellerState: 'ES',
+      rtvName: 'Renata Viana',
+      rtvPhone: '27997776622',
       items: bid2Items,
       freightCost: freight2,
       deliveryDays: 5,
       totalAmount: total2, // Menor Preço Global
       status: 'SUBMITTED',
+      awardType: 'NONE',
       notes: 'Frete cortesia para pedidos de lote completo. Pagamento 30/60 dias.',
       createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
     };
@@ -676,6 +683,9 @@ export const quotationService = {
           freight_cost: bid.freightCost,
           delivery_days: bid.deliveryDays,
           status: bid.status,
+          award_type: bid.awardType || 'NONE',
+          rtv_name: bid.rtvName,
+          rtv_phone: bid.rtvPhone,
           notes: bid.notes,
         });
 
@@ -691,6 +701,7 @@ export const quotationService = {
               total_price: item.totalPrice,
               is_equivalent: item.isEquivalent,
               active_ingredient_concentration: item.activeIngredientConcentration,
+              is_awarded: item.isAwarded || false,
               notes: item.notes,
             });
           }
@@ -733,15 +744,99 @@ export const quotationService = {
   },
 
   /**
-   * Aceita uma proposta vencedora, atualiza os status e salva no banco/local
+   * Gera a URL do WhatsApp para abertura de conversa direta com o RTV
+   * Mensagem pré-preenchida exata:
+   * "Olá [Nome RTV], aceitei sua proposta para a Cotação #[ID] no CotaCampo no valor total de R$ [Valor]. Vamos finalizar o pedido e o faturamento?"
    */
-  async acceptBid(quotationId: string, acceptedBidId: string): Promise<void> {
+  generateWhatsAppUrl(params: {
+    rtvName: string;
+    rtvPhone: string;
+    quotationCode: string;
+    totalAmount: number;
+  }): string {
+    const { rtvName, rtvPhone, quotationCode, totalAmount } = params;
+
+    const cleanPhone = rtvPhone.replace(/\D/g, '');
+    const phoneWithCountry = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+
+    const formattedAmount = totalAmount.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const message = `Olá ${rtvName}, aceitei sua proposta para a Cotação #${quotationCode} no CotaCampo no valor total de R$ ${formattedAmount}. Vamos finalizar o pedido e o faturamento?`;
+
+    return `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
+  },
+
+  /**
+   * Consolida as revendas e RTVs premiados (lote completo ou parcial)
+   */
+  getAwardedResellersSummary(
+    quotation: QuotationRequest,
+    bids: QuotationBid[]
+  ): AwardedResellerSummary[] {
+    const awardedBids = bids.filter(
+      (b) =>
+        b.status === 'ACCEPTED' ||
+        b.status === 'PARTIALLY_ACCEPTED' ||
+        b.items.some((it) => it.isAwarded)
+    );
+
+    return awardedBids.map((b) => {
+      const isFull = b.awardType === 'FULL' || b.status === 'ACCEPTED';
+      const awardedItems = isFull
+        ? b.items
+        : b.items.filter((it) => it.isAwarded);
+
+      const subtotal = awardedItems.reduce((acc, it) => acc + it.totalPrice, 0);
+      const freight = isFull ? b.freightCost : 0;
+      const total = Number((subtotal + freight).toFixed(2));
+
+      const rtvName = b.rtvName || 'Representante Comercial';
+      const rtvPhone = b.rtvPhone || '27998887711';
+      const quotationCode = quotation.displayCode || quotation.id.slice(0, 8);
+
+      const whatsAppUrl = this.generateWhatsAppUrl({
+        rtvName,
+        rtvPhone,
+        quotationCode,
+        totalAmount: total,
+      });
+
+      return {
+        bidId: b.id,
+        resellerId: b.resellerId,
+        resellerName: b.resellerName,
+        resellerTradeName: b.resellerTradeName,
+        rtvName,
+        rtvPhone,
+        awardedItems,
+        subtotal,
+        freightCost: freight,
+        totalAmount: total,
+        whatsAppUrl,
+      };
+    });
+  },
+
+  /**
+   * US10 Cenário 1: Aceite do Lote Completo de uma revenda
+   */
+  async acceptFullLot(quotationId: string, bidId: string): Promise<QuotationBid> {
     const bids = await this.getQuotationBids(quotationId);
+    let winningBid: QuotationBid | null = null;
+
     for (const b of bids) {
-      if (b.id === acceptedBidId) {
+      if (b.id === bidId) {
         b.status = 'ACCEPTED';
+        b.awardType = 'FULL';
+        b.items = b.items.map((it) => ({ ...it, isAwarded: true }));
+        winningBid = b;
       } else {
         b.status = 'REJECTED';
+        b.awardType = 'NONE';
+        b.items = b.items.map((it) => ({ ...it, isAwarded: false }));
       }
       await this.saveBid(b);
     }
@@ -752,5 +847,65 @@ export const quotationService = {
       quotation.updatedAt = new Date().toISOString();
       await this.saveQuotation(quotation);
     }
+
+    if (!winningBid) {
+      throw new Error(`Proposta com ID ${bidId} não encontrada.`);
+    }
+
+    return winningBid;
+  },
+
+  /**
+   * US10 Cenário 2: Aceite Parcial (Item a Item)
+   * itemSelections: mapa de quotationItemId (ou id do item) para o bidId escolhido
+   */
+  async acceptPartialItems(
+    quotationId: string,
+    itemSelections: Record<string, string>
+  ): Promise<AwardedResellerSummary[]> {
+    const bids = await this.getQuotationBids(quotationId);
+    const quotation = await this.getQuotationById(quotationId);
+    if (!quotation) throw new Error(`Cotação ${quotationId} não encontrada.`);
+
+    for (const b of bids) {
+      let awardedCount = 0;
+      b.items = b.items.map((it) => {
+        const isChosenForThisBid =
+          (it.quotationItemId && itemSelections[it.quotationItemId] === b.id) ||
+          itemSelections[it.id] === b.id;
+
+        if (isChosenForThisBid) {
+          awardedCount++;
+          return { ...it, isAwarded: true };
+        }
+        return { ...it, isAwarded: false };
+      });
+
+      if (awardedCount === b.items.length && b.items.length > 0) {
+        b.status = 'ACCEPTED';
+        b.awardType = 'FULL';
+      } else if (awardedCount > 0) {
+        b.status = 'PARTIALLY_ACCEPTED';
+        b.awardType = 'PARTIAL';
+      } else {
+        b.status = 'REJECTED';
+        b.awardType = 'NONE';
+      }
+
+      await this.saveBid(b);
+    }
+
+    quotation.status = 'AWARDED';
+    quotation.updatedAt = new Date().toISOString();
+    await this.saveQuotation(quotation);
+
+    return this.getAwardedResellersSummary(quotation, bids);
+  },
+
+  /**
+   * Aceita uma proposta vencedora (compatibilidade com US09 delegando para acceptFullLot)
+   */
+  async acceptBid(quotationId: string, acceptedBidId: string): Promise<void> {
+    await this.acceptFullLot(quotationId, acceptedBidId);
   },
 };

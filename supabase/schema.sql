@@ -158,8 +158,11 @@ CREATE TABLE quotation_bids (
     reseller_id UUID NOT NULL REFERENCES resellers(id) ON DELETE RESTRICT,
     total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount > 0),
     freight_cost NUMERIC(12, 2) DEFAULT 0.00 CHECK (freight_cost >= 0),
-    status VARCHAR(30) DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED', 'ACCEPTED', 'REJECTED')),
+    status VARCHAR(30) DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED', 'ACCEPTED', 'REJECTED', 'PARTIALLY_ACCEPTED')),
+    award_type VARCHAR(30) DEFAULT 'NONE' CHECK (award_type IN ('NONE', 'FULL', 'PARTIAL')),
     delivery_days INTEGER NOT NULL CHECK (delivery_days >= 0),
+    rtv_name VARCHAR(255),
+    rtv_phone VARCHAR(50),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
@@ -176,6 +179,7 @@ CREATE TABLE quotation_bid_items (
     total_price NUMERIC(12, 2) NOT NULL CHECK (total_price >= 0),
     is_equivalent BOOLEAN DEFAULT false,
     active_ingredient_concentration VARCHAR(255),
+    is_awarded BOOLEAN DEFAULT false,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
 );

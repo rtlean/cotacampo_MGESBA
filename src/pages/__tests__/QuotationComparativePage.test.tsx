@@ -96,6 +96,8 @@ describe('US09 – Análise Comparativa Equalizada de Propostas (QuotationCompar
       freightCost: 150.00,
       deliveryDays: 2, // Entrega Mais Rápida
       totalAmount: 8400.00,
+      rtvName: 'Carlos Eduardo Mendes',
+      rtvPhone: '(27) 99888-7711',
       status: 'SUBMITTED',
       notes: 'Entrega rápida com frota própria em Linhares.',
       createdAt: new Date().toISOString(),
@@ -133,6 +135,8 @@ describe('US09 – Análise Comparativa Equalizada de Propostas (QuotationCompar
       freightCost: 0.00, // Frete Grátis
       deliveryDays: 5,
       totalAmount: 7000.00, // Menor Preço Global
+      rtvName: 'Renata Viana',
+      rtvPhone: '(27) 99777-6622',
       status: 'SUBMITTED',
       notes: 'Frete cortesia para entrega de lote fechado.',
       createdAt: new Date().toISOString(),
@@ -319,22 +323,50 @@ describe('US09 – Análise Comparativa Equalizada de Propostas (QuotationCompar
     expect(screen.getByText(/Propostas recebidas até o momento:/i)).toBeInTheDocument();
   });
 
-  it('deve permitir que o produtor aceite uma proposta e atualize o estado para Proposta Escolhida', async () => {
-    const acceptBidSpy = vi.spyOn(quotationService, 'acceptBid').mockResolvedValue();
+  it('deve permitir que o produtor abra o modal de segurança e confirme o Aceite do Lote Completo', async () => {
+    const acceptFullLotSpy = vi.spyOn(quotationService, 'acceptFullLot').mockResolvedValue(mockBids[1]);
     vi.spyOn(quotationService, 'getQuotationById').mockResolvedValue(mockQuote);
     vi.spyOn(quotationService, 'getQuotationBids').mockResolvedValue(mockBids);
 
     render(<QuotationComparativePage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('btn-accept-bid-2')).toBeInTheDocument();
+      expect(screen.getByTestId('btn-accept-full-lot-bid-2')).toBeInTheDocument();
     });
 
-    // Clica no botão Aceitar Proposta da revenda 2 (Melhor Preço)
-    fireEvent.click(screen.getByTestId('btn-accept-bid-2'));
+    // 1. Clica em "Aceitar Lote Completo" da revenda 2 (Melhor Preço)
+    fireEvent.click(screen.getByTestId('btn-accept-full-lot-bid-2'));
+
+    // Modal de segurança deve abrir
+    await waitFor(() => {
+      expect(screen.getByText('Confirmar Aceite do Lote Completo')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('Café & Campo Insumos').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Renata Viana').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('(27) 99777-6622').length).toBeGreaterThanOrEqual(1);
+
+    // Testa fechar/cancelar modal com botão X
+    fireEvent.click(screen.getByTestId('btn-cancel-modal'));
+    expect(screen.queryByText('Confirmar Aceite do Lote Completo')).not.toBeInTheDocument();
+    expect(acceptFullLotSpy).not.toHaveBeenCalled();
+
+    // Reabre e testa fechar com botão Cancelar
+    fireEvent.click(screen.getByTestId('btn-accept-full-lot-bid-2'));
+    await waitFor(() => {
+      expect(screen.getByTestId('btn-cancel-full-lot-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('btn-cancel-full-lot-modal'));
+    expect(screen.queryByText('Confirmar Aceite do Lote Completo')).not.toBeInTheDocument();
+
+    // Reabre e confirma
+    fireEvent.click(screen.getByTestId('btn-accept-full-lot-bid-2'));
+    await waitFor(() => {
+      expect(screen.getByTestId('btn-confirm-full-lot-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('btn-confirm-full-lot-modal'));
 
     await waitFor(() => {
-      expect(acceptBidSpy).toHaveBeenCalledWith('quote-test-123', 'bid-2');
+      expect(acceptFullLotSpy).toHaveBeenCalledWith('quote-test-123', 'bid-2');
       expect(screen.getByText('Proposta Vencedora Confirmada!')).toBeInTheDocument();
     });
 
@@ -346,10 +378,213 @@ describe('US09 – Análise Comparativa Equalizada de Propostas (QuotationCompar
     expect(screen.queryByText('Proposta Vencedora Confirmada!')).not.toBeInTheDocument();
   });
 
+  describe('US10 – Aceite de Proposta e Fechamento via WhatsApp', () => {
+    it('Cenário 1: Aceite do Lote Completo e abertura de conversa no WhatsApp com mensagem pré-preenchida', async () => {
+      const quoteInReview: QuotationRequest = {
+        ...mockQuote,
+        status: 'IN_REVIEW',
+      };
+
+      const winningBid = {
+        ...mockBids[0],
+        status: 'ACCEPTED' as const,
+        awardType: 'FULL' as const,
+      };
+
+      vi.spyOn(quotationService, 'getQuotationById').mockResolvedValue(quoteInReview);
+      vi.spyOn(quotationService, 'getQuotationBids').mockResolvedValue(mockBids);
+      const acceptFullLotSpy = vi.spyOn(quotationService, 'acceptFullLot').mockResolvedValue(winningBid);
+
+      render(<QuotationComparativePage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('btn-accept-full-lot-bid-1')).toBeInTheDocument();
+      });
+
+      // Produtor clica em "Aceitar Lote Completo" na coluna da AgroCenter Linhares
+      fireEvent.click(screen.getByTestId('btn-accept-full-lot-bid-1'));
+
+      // Modal de segurança exibido
+      await waitFor(() => {
+        expect(screen.getByText('Confirmar Aceite do Lote Completo')).toBeInTheDocument();
+      });
+      expect(screen.getAllByText('AgroCenter Linhares').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Carlos Eduardo Mendes').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('(27) 99888-7711').length).toBeGreaterThanOrEqual(1);
+
+      // Confirma a decisão no modal de segurança
+      fireEvent.click(screen.getByTestId('btn-confirm-full-lot-modal'));
+
+      await waitFor(() => {
+        expect(acceptFullLotSpy).toHaveBeenCalledWith('quote-test-123', 'bid-1');
+      });
+
+      // Sistema deve renderizar o botão [ Chamar no WhatsApp ]
+      await waitFor(() => {
+        const whatsAppBtns = screen.getAllByTestId(/btn-whatsapp-/);
+        expect(whatsAppBtns.length).toBeGreaterThan(0);
+      });
+
+      const whatsAppBtn = screen.getByTestId('btn-whatsapp-bid-1');
+      expect(whatsAppBtn).toBeInTheDocument();
+      expect(whatsAppBtn).toHaveAttribute('target', '_blank');
+      expect(whatsAppBtn).toHaveAttribute('rel', 'noopener noreferrer');
+
+      // Verifica texto e URL do WhatsApp
+      const href = whatsAppBtn.getAttribute('href') || '';
+      expect(href).toContain('https://wa.me/5527998887711?text=');
+
+      // Mensagem esperada:
+      // "Olá Carlos Eduardo Mendes, aceitei sua proposta para a Cotação #COT-009 no CotaCampo no valor total de R$ 8.400,00. Vamos finalizar o pedido e o faturamento?"
+      const expectedMessage =
+        'Olá Carlos Eduardo Mendes, aceitei sua proposta para a Cotação #COT-009 no CotaCampo no valor total de R$ 8.400,00. Vamos finalizar o pedido e o faturamento?';
+      expect(href).toContain(encodeURIComponent(expectedMessage));
+    });
+
+    it('Cenário 2: Aceite Parcial (Item a Item) com múltiplos fornecedores e botões individuais de WhatsApp', async () => {
+      vi.spyOn(quotationService, 'getQuotationById').mockResolvedValue(mockQuote);
+      vi.spyOn(quotationService, 'getQuotationBids').mockResolvedValue(mockBids);
+
+      const partialSummaryResult = [
+        {
+          bidId: 'bid-1',
+          resellerId: 'reseller-1',
+          resellerName: 'AgroCenter Linhares Ltda',
+          resellerTradeName: 'AgroCenter Linhares',
+          rtvName: 'Carlos Eduardo Mendes',
+          rtvPhone: '(27) 99888-7711',
+          awardedItems: [mockBids[0].items[0]],
+          subtotal: 4250.0,
+          freightCost: 0,
+          totalAmount: 4250.0,
+          whatsAppUrl: quotationService.generateWhatsAppUrl({
+            rtvName: 'Carlos Eduardo Mendes',
+            rtvPhone: '(27) 99888-7711',
+            quotationCode: 'COT-009',
+            totalAmount: 4250.0,
+          }),
+        },
+        {
+          bidId: 'bid-2',
+          resellerId: 'reseller-2',
+          resellerName: 'Café & Campo Distribuidora Ltda',
+          resellerTradeName: 'Café & Campo Insumos',
+          rtvName: 'Renata Viana',
+          rtvPhone: '(27) 99777-6622',
+          awardedItems: [mockBids[1].items[1]],
+          subtotal: 3500.0,
+          freightCost: 0,
+          totalAmount: 3500.0,
+          whatsAppUrl: quotationService.generateWhatsAppUrl({
+            rtvName: 'Renata Viana',
+            rtvPhone: '(27) 99777-6622',
+            quotationCode: 'COT-009',
+            totalAmount: 3500.0,
+          }),
+        },
+      ];
+
+      const acceptPartialSpy = vi
+        .spyOn(quotationService, 'acceptPartialItems')
+        .mockResolvedValue(partialSummaryResult);
+
+      render(<QuotationComparativePage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('btn-select-item-bid-1-0')).toBeInTheDocument();
+        expect(screen.getByTestId('btn-select-item-bid-2-1')).toBeInTheDocument();
+      });
+
+      // Seleciona Item 1 da Revenda 1
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-1-0'));
+      expect(screen.getByText('1 de 2 itens selecionados')).toBeInTheDocument();
+
+      // Seleciona Item 2 da Revenda 2
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-2-1'));
+      expect(screen.getByText('2 de 2 itens selecionados')).toBeInTheDocument();
+
+      // Testa desmarcar e remarcar item
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-2-1'));
+      expect(screen.getByText('1 de 2 itens selecionados')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-2-1'));
+      expect(screen.getByText('2 de 2 itens selecionados')).toBeInTheDocument();
+
+      // Testa botão "Limpar"
+      fireEvent.click(screen.getByRole('button', { name: /Limpar/i }));
+      expect(screen.queryByText('itens selecionados')).not.toBeInTheDocument();
+
+      // Seleciona ambos novamente
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-1-0'));
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-2-1'));
+
+      // Clica no botão geral "Confirmar Escolhas Selecionadas" da barra flutuante
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-selection'));
+
+      // Modal de segurança para aceite fracionado deve abrir
+      expect(screen.getByText('Confirmar Aceite Parcial (Item a Item)')).toBeInTheDocument();
+      expect(screen.getByText(/Divisão de fornecimento por revenda selecionada/i)).toBeInTheDocument();
+
+      // Testa fechar o modal
+      fireEvent.click(screen.getByRole('button', { name: /Cancelar/i }));
+      expect(screen.queryByText('Confirmar Aceite Parcial (Item a Item)')).not.toBeInTheDocument();
+
+      // Reabre e testa fechar com botão X
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-selection'));
+      fireEvent.click(screen.getByTestId('btn-close-partial-modal'));
+      expect(screen.queryByText('Confirmar Aceite Parcial (Item a Item)')).not.toBeInTheDocument();
+
+      // Reabre e confirma
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-selection'));
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-modal'));
+
+      await waitFor(() => {
+        expect(acceptPartialSpy).toHaveBeenCalledWith('quote-test-123', {
+          'item-1': 'bid-1',
+          'item-2': 'bid-2',
+        });
+      });
+
+      // Tela de resumo deve disponibilizar botões individuais de WhatsApp para cada um dos RTVs premiados
+      await waitFor(() => {
+        expect(screen.getByTestId('btn-whatsapp-bid-1')).toBeInTheDocument();
+        expect(screen.getByTestId('btn-whatsapp-bid-2')).toBeInTheDocument();
+      });
+
+      const btnRtv1 = screen.getByTestId('btn-whatsapp-bid-1');
+      const btnRtv2 = screen.getByTestId('btn-whatsapp-bid-2');
+
+      expect(btnRtv1.getAttribute('href')).toContain('https://wa.me/5527998887711');
+      expect(btnRtv2.getAttribute('href')).toContain('https://wa.me/5527997776622');
+    });
+
+    it('deve tratar erro no aceite parcial com registro em console.error', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(quotationService, 'getQuotationById').mockResolvedValue(mockQuote);
+      vi.spyOn(quotationService, 'getQuotationBids').mockResolvedValue(mockBids);
+      vi.spyOn(quotationService, 'acceptPartialItems').mockRejectedValue(new Error('Partial fail'));
+
+      render(<QuotationComparativePage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('btn-select-item-bid-1-0')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('btn-select-item-bid-1-0'));
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-selection'));
+      fireEvent.click(screen.getByTestId('btn-confirm-partial-modal'));
+
+      await waitFor(() => {
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Erro ao confirmar seleção parcial:', expect.any(Error));
+      });
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
   it('deve exibir badge Proposta Aceita se uma proposta já vier com status ACCEPTED do banco', async () => {
     const bidsWithAccepted: QuotationBid[] = [
       { ...mockBids[0], status: 'REJECTED' },
-      { ...mockBids[1], status: 'ACCEPTED' },
+      { ...mockBids[1], status: 'ACCEPTED', awardType: 'FULL' },
     ];
     const awardedQuote = { ...mockQuote, status: 'AWARDED' as const };
 
@@ -396,19 +631,23 @@ describe('US09 – Análise Comparativa Equalizada de Propostas (QuotationCompar
     consoleErrorSpy.mockRestore();
   });
 
-  it('deve tratar erro ao aceitar proposta com falha no serviço', async () => {
+  it('deve tratar erro ao aceitar lote completo com falha no serviço', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(quotationService, 'getQuotationById').mockResolvedValue(mockQuote);
     vi.spyOn(quotationService, 'getQuotationBids').mockResolvedValue(mockBids);
-    vi.spyOn(quotationService, 'acceptBid').mockRejectedValue(new Error('Accept bid failed'));
+    vi.spyOn(quotationService, 'acceptFullLot').mockRejectedValue(new Error('Accept full lot failed'));
 
     render(<QuotationComparativePage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('btn-accept-bid-1')).toBeInTheDocument();
+      expect(screen.getByTestId('btn-accept-full-lot-bid-1')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('btn-accept-bid-1'));
+    fireEvent.click(screen.getByTestId('btn-accept-full-lot-bid-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('btn-confirm-full-lot-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('btn-confirm-full-lot-modal'));
 
     await waitFor(() => {
       expect(consoleErrorSpy).toHaveBeenCalledWith('Erro ao aceitar proposta:', expect.any(Error));

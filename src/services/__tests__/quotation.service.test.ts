@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { quotationService } from '../quotation.service';
-import { QuotationRequest } from '../../types/quotation';
+import { QuotationRequest, BidStatus, BidAwardType } from '../../types/quotation';
 import { supabase } from '../supabase';
 
 describe('Quotation Service', () => {
@@ -840,6 +840,221 @@ describe('Quotation Service', () => {
 
       const updatedQuote = await quotationService.getQuotationById(mockQuote.id);
       expect(updatedQuote?.status).toBe('AWARDED');
+    });
+
+    describe('US10 – WhatsApp URL & Proposal Awarding', () => {
+      it('generateWhatsAppUrl: deve formatar mensagem exata e sanitizar telefone com DDI 55', () => {
+        const url = quotationService.generateWhatsAppUrl({
+          rtvName: 'Carlos Eduardo Mendes',
+          rtvPhone: '(27) 99888-7711',
+          quotationCode: 'COT-009',
+          totalAmount: 8400.0,
+        });
+
+        const expectedText =
+          'Olá Carlos Eduardo Mendes, aceitei sua proposta para a Cotação #COT-009 no CotaCampo no valor total de R$ 8.400,00. Vamos finalizar o pedido e o faturamento?';
+        const expectedUrl = `https://wa.me/5527998887711?text=${encodeURIComponent(expectedText)}`;
+
+        expect(url).toBe(expectedUrl);
+      });
+
+      it('generateWhatsAppUrl: não deve duplicar o prefixo 55 se o telefone já o contiver', () => {
+        const url = quotationService.generateWhatsAppUrl({
+          rtvName: 'Renata Viana',
+          rtvPhone: '+55 27 99777-6622',
+          quotationCode: 'COT-010',
+          totalAmount: 1520.5,
+        });
+
+        expect(url).toContain('https://wa.me/5527997776622?text=');
+        expect(url).toContain(encodeURIComponent('R$ 1.520,50'));
+      });
+
+      it('acceptFullLot: deve marcar proposta vencedora como ACCEPTED e FULL, as demais REJECTED e cotação AWARDED', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        const result = await quotationService.acceptFullLot(mockQuote.id, bids[0].id);
+
+        expect(result.id).toBe(bids[0].id);
+
+        const updatedQuote = await quotationService.getQuotationById(mockQuote.id);
+        expect(updatedQuote?.status).toBe('AWARDED');
+
+        const updatedBids = await quotationService.getQuotationBids(mockQuote.id);
+        const winningBid = updatedBids.find((b) => b.id === bids[0].id);
+        const losingBid = updatedBids.find((b) => b.id === bids[1].id);
+
+        expect(winningBid?.status).toBe('ACCEPTED');
+        expect(winningBid?.awardType).toBe('FULL');
+        expect(winningBid?.items.every((it) => it.isAwarded)).toBe(true);
+
+        expect(losingBid?.status).toBe('REJECTED');
+        expect(losingBid?.awardType).toBe('NONE');
+        expect(losingBid?.items.every((it) => !it.isAwarded)).toBe(true);
+      });
+
+      it('acceptFullLot: deve lidar com cotação inexistente', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([]));
+        await expect(quotationService.acceptFullLot('inexistent-quote', 'bid-1')).rejects.toThrow();
+      });
+
+      it('acceptFullLot: deve sincronizar com Supabase e tratar falha graciosamente', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        // Mock do Supabase com sucesso
+        const upsertMock = vi.fn().mockResolvedValue({ error: null });
+        vi.spyOn(supabase, 'from').mockReturnValue({
+          upsert: upsertMock,
+        } as unknown as ReturnType<typeof supabase.from>);
+
+        await quotationService.acceptFullLot(mockQuote.id, bids[0].id);
+        expect(upsertMock).toHaveBeenCalled();
+
+        // Mock com falha no Supabase
+        vi.spyOn(supabase, 'from').mockReturnValue({
+          upsert: vi.fn().mockRejectedValueOnce(new Error('Remote DB error')),
+        } as unknown as ReturnType<typeof supabase.from>);
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await quotationService.acceptFullLot(mockQuote.id, bids[0].id);
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Erro ao sincronizar bid com Supabase:',
+          expect.any(Error)
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('acceptPartialItems: deve associar itens a propostas vencedoras distintas e definir cotação como AWARDED', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        // Seleciona item-1 da revenda 1 e item-2 da revenda 2
+        const selections = {
+          'item-1': bids[0].id,
+          'item-2': bids[1].id,
+        };
+
+        const result = await quotationService.acceptPartialItems(mockQuote.id, selections);
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBe(2);
+
+        const updatedQuote = await quotationService.getQuotationById(mockQuote.id);
+        expect(updatedQuote?.status).toBe('AWARDED');
+
+        const updatedBids = await quotationService.getQuotationBids(mockQuote.id);
+        const bid1 = updatedBids.find((b) => b.id === bids[0].id);
+        const bid2 = updatedBids.find((b) => b.id === bids[1].id);
+
+        expect(bid1?.status).toBe('PARTIALLY_ACCEPTED');
+        expect(bid1?.awardType).toBe('PARTIAL');
+        expect(bid1?.items.find((it) => it.quotationItemId === 'item-1')?.isAwarded).toBe(true);
+        expect(bid1?.items.find((it) => it.quotationItemId === 'item-2')?.isAwarded).toBe(false);
+
+        expect(bid2?.status).toBe('PARTIALLY_ACCEPTED');
+        expect(bid2?.awardType).toBe('PARTIAL');
+        expect(bid2?.items.find((it) => it.quotationItemId === 'item-2')?.isAwarded).toBe(true);
+        expect(bid2?.items.find((it) => it.quotationItemId === 'item-1')?.isAwarded).toBe(false);
+      });
+
+      it('acceptPartialItems: revenda com nenhum item selecionado deve ser REJECTED', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        // Seleciona apenas itens da revenda 1
+        const selections = {
+          'item-1': bids[0].id,
+        };
+
+        const result = await quotationService.acceptPartialItems(mockQuote.id, selections);
+        expect(result.length).toBe(1);
+
+        const updatedBids = await quotationService.getQuotationBids(mockQuote.id);
+        const bid2 = updatedBids.find((b) => b.id === bids[1].id);
+        expect(bid2?.status).toBe('REJECTED');
+        expect(bid2?.awardType).toBe('NONE');
+      });
+
+      it('acceptPartialItems: revenda com todos os itens contemplados deve ser marcada como FULL e ACCEPTED', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        // Seleciona todos os itens da revenda 1
+        const selections = {
+          'item-1': bids[0].id,
+          'item-2': bids[0].id,
+        };
+
+        await quotationService.acceptPartialItems(mockQuote.id, selections);
+        const updatedBids = await quotationService.getQuotationBids(mockQuote.id);
+        const bid1 = updatedBids.find((b) => b.id === bids[0].id);
+        expect(bid1?.status).toBe('ACCEPTED');
+        expect(bid1?.awardType).toBe('FULL');
+      });
+
+      it('acceptPartialItems: deve lançar erro para cotação inexistente', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([]));
+        await expect(quotationService.acceptPartialItems('inexistent-quote', {})).rejects.toThrow();
+      });
+
+      it('acceptPartialItems: deve sincronizar com Supabase e tratar erro com console.warn', async () => {
+        localStorage.setItem('cotacampo_quotations', JSON.stringify([mockQuote]));
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+        localStorage.setItem('cotacampo_quotation_bids', JSON.stringify(bids));
+
+        vi.spyOn(supabase, 'from').mockReturnValue({
+          upsert: vi.fn().mockRejectedValue(new Error('Partial Supabase sync failed')),
+        } as unknown as ReturnType<typeof supabase.from>);
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await quotationService.acceptPartialItems(mockQuote.id, { 'item-1': bids[0].id });
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Erro ao sincronizar bid com Supabase:',
+          expect.any(Error)
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('getAwardedResellersSummary: deve retornar resumo com URL de WhatsApp para propostas completas e parciais', () => {
+        const bids = quotationService.seedDemoBidsForQuotation(mockQuote);
+
+        // Caso 1: Nenhuma proposta premiada
+        expect(quotationService.getAwardedResellersSummary(mockQuote, bids)).toEqual([]);
+
+        // Caso 2: Aceite do Lote Completo
+        const fullLotBids = bids.map((b, idx) => ({
+          ...b,
+          status: (idx === 0 ? 'ACCEPTED' : 'REJECTED') as BidStatus,
+          awardType: (idx === 0 ? 'FULL' : 'NONE') as BidAwardType,
+          items: b.items.map((it) => ({ ...it, isAwarded: idx === 0 })),
+        }));
+
+        const summaries = quotationService.getAwardedResellersSummary(mockQuote, fullLotBids);
+        expect(summaries.length).toBe(1);
+        expect(summaries[0].bidId).toBe(bids[0].id);
+        expect(summaries[0].rtvName).toBe(bids[0].rtvName);
+        expect(summaries[0].whatsAppUrl).toContain('https://wa.me/');
+        expect(summaries[0].awardedItems.length).toBe(2);
+
+        // Caso 3: Aceite Parcial com ambas as revendas
+        const partialBids = bids.map((b, idx) => ({
+          ...b,
+          status: 'PARTIALLY_ACCEPTED' as const,
+          awardType: 'PARTIAL' as const,
+          items: b.items.map((it, itIdx) => ({ ...it, isAwarded: itIdx === idx })),
+        }));
+
+        const partialSummaries = quotationService.getAwardedResellersSummary(mockQuote, partialBids);
+        expect(partialSummaries.length).toBe(2);
+        expect(partialSummaries[0].awardedItems.length).toBe(1);
+        expect(partialSummaries[1].awardedItems.length).toBe(1);
+      });
     });
   });
 });

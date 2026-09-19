@@ -114,8 +114,12 @@ export interface QuotationBidItem {
   totalPrice: number;
   isEquivalent?: boolean;
   activeIngredientConcentration?: string;
+  isAwarded?: boolean;
   notes?: string;
 }
+
+export type BidAwardType = 'NONE' | 'FULL' | 'PARTIAL';
+export type BidStatus = 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'PARTIALLY_ACCEPTED';
 
 export interface QuotationBid {
   id: string;
@@ -125,11 +129,14 @@ export interface QuotationBid {
   resellerTradeName?: string;
   resellerCity: string;
   resellerState: SupportedState;
+  rtvName?: string;
+  rtvPhone?: string;
   items: QuotationBidItem[];
   freightCost: number;
   deliveryDays: number;
   totalAmount: number;
-  status: 'SUBMITTED' | 'ACCEPTED' | 'REJECTED';
+  status: BidStatus;
+  awardType?: BidAwardType;
   notes?: string;
   createdAt: string;
 }
@@ -139,4 +146,18 @@ export interface ComparativeAnalysis {
   bids: QuotationBid[];
   bestPriceBidId: string | null;
   fastestDeliveryBidId: string | null;
+}
+
+export interface AwardedResellerSummary {
+  bidId: string;
+  resellerId: string;
+  resellerName: string;
+  resellerTradeName?: string;
+  rtvName: string;
+  rtvPhone: string;
+  awardedItems: QuotationBidItem[];
+  subtotal: number;
+  freightCost: number;
+  totalAmount: number;
+  whatsAppUrl: string;
 }

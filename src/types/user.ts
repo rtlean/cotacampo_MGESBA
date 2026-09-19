@@ -2,7 +2,28 @@ export type UserRole = 'PRODUCER' | 'RESELLER';
 
 export type SupportedState = 'MG' | 'ES' | 'BA';
 
-export type CropId = 'cafe' | 'cacau' | 'pimenta' | 'mamao';
+export type CropId =
+  | 'cafe'
+  | 'cafe_conilon'
+  | 'cafe_arabica'
+  | 'cacau'
+  | 'pimenta'
+  | 'pimenta_reino'
+  | 'mamao';
+
+export type FarmScale = 'PEQUENA' | 'MEDIA' | 'GRANDE';
+
+export interface CropDimensionInput {
+  area: string;
+  plantsCount?: string;
+}
+
+export interface CropDimensionData {
+  cropId: CropId;
+  plantedAreaHectares: number;
+  plantsCount?: number;
+  scale: FarmScale;
+}
 
 export interface CropInfo {
   id: CropId;
@@ -42,6 +63,7 @@ export interface ProducerProfile {
   state: SupportedState;
   city: string;
   crops: CropId[];
+  cropDimensions?: Record<string, CropDimensionInput>;
   createdAt: string;
 }
 
@@ -87,6 +109,7 @@ export interface RegisterFormData {
   state: SupportedState | '';
   city: string;
   crops: CropId[];
+  cropDimensions?: Record<string, CropDimensionInput>;
 }
 
 export interface ResellerFormData {
@@ -113,6 +136,7 @@ export interface FormErrors {
   state?: string;
   city?: string;
   crops?: string;
+  [key: string]: string | undefined;
 }
 
 export interface ResellerFormErrors {

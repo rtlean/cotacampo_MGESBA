@@ -88,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         state: validData.state,
         city: validData.city,
         crops: validData.crops,
+        cropDimensions: validData.cropDimensions,
         createdAt: new Date().toISOString(),
       };
 

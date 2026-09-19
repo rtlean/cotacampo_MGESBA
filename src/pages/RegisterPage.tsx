@@ -16,7 +16,11 @@ import {
   SupportedState,
   SupplyCategoryId,
   UserRole,
+  CropId,
+  CropDimensionInput,
 } from '../types/user';
+import { CROPS, getCropName } from '../data/crops';
+import { calculateCropScale, normalizeAreaInput } from '../schemas/producer.schema';
 import {
   User,
   Mail,
@@ -29,6 +33,7 @@ import {
   Store,
   Radio,
   AlertCircle,
+  Layers,
 } from 'lucide-react';
 
 export const RegisterPage: React.FC = () => {
@@ -47,7 +52,10 @@ export const RegisterPage: React.FC = () => {
     farmName: '',
     state: 'ES',
     city: 'Linhares',
-    crops: ['cafe'],
+    crops: ['cafe_conilon'],
+    cropDimensions: {
+      cafe_conilon: { area: '', plantsCount: '' },
+    },
   });
   const [producerErrors, setProducerErrors] = useState<FormErrors>({});
 
@@ -79,6 +87,7 @@ export const RegisterPage: React.FC = () => {
   const prodStateRef = useRef<HTMLSelectElement>(null);
   const prodCityRef = useRef<HTMLSelectElement>(null);
   const cropsRef = useRef<HTMLButtonElement>(null);
+  const cropAreaRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Reseller Field Refs
   const razaoSocialRef = useRef<HTMLInputElement>(null);
@@ -145,8 +154,82 @@ export const RegisterPage: React.FC = () => {
     }));
   };
 
-  const validateProducerForm = (): { isValid: boolean; firstErrorRef: React.RefObject<HTMLElement | null> | null } => {
-    const parseResult = producerRegistrationSchema.safeParse(producerData);
+  // US01.1 - Gerenciamento dinâmico de culturas e expurgo de estado
+  const handleCropsChange = (newCrops: CropId[]) => {
+    setProducerData((prev) => {
+      const nextDimensions: Record<string, CropDimensionInput> = {};
+      for (const crop of newCrops) {
+        if (prev.cropDimensions?.[crop]) {
+          nextDimensions[crop] = prev.cropDimensions[crop];
+        } else {
+          nextDimensions[crop] = { area: '', plantsCount: '' };
+        }
+      }
+      return {
+        ...prev,
+        crops: newCrops,
+        cropDimensions: nextDimensions,
+      };
+    });
+
+    setProducerErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (nextErrors.crops) delete nextErrors.crops;
+      for (const key of Object.keys(nextErrors)) {
+        if (key.startsWith('cropDimension_')) {
+          const cropId = key.replace('cropDimension_', '') as CropId;
+          if (!newCrops.includes(cropId)) {
+            delete nextErrors[key];
+          }
+        }
+      }
+      return nextErrors;
+    });
+  };
+
+  const handleCropDimensionChange = (
+    cropId: CropId,
+    field: 'area' | 'plantsCount',
+    value: string
+  ) => {
+    setProducerData((prev) => ({
+      ...prev,
+      cropDimensions: {
+        ...(prev.cropDimensions || {}),
+        [cropId]: {
+          ...(prev.cropDimensions?.[cropId] || { area: '', plantsCount: '' }),
+          [field]: value,
+        },
+      },
+    }));
+
+    const errorKey = `cropDimension_${cropId}`;
+    if (producerErrors[errorKey]) {
+      setProducerErrors((prev) => {
+        const next = { ...prev };
+        delete next[errorKey];
+        return next;
+      });
+    }
+  };
+
+  const validateProducerForm = (): {
+    isValid: boolean;
+    firstErrorRef: { current: HTMLElement | null } | null;
+  } => {
+    // Purge prévio para validação no Zod schema (Cenário 4)
+    const cleanedDimensions: Record<string, CropDimensionInput> = {};
+    for (const c of producerData.crops) {
+      if (producerData.cropDimensions?.[c]) {
+        cleanedDimensions[c] = producerData.cropDimensions[c];
+      }
+    }
+    const dataToValidate = {
+      ...producerData,
+      cropDimensions: cleanedDimensions,
+    };
+
+    const parseResult = producerRegistrationSchema.safeParse(dataToValidate);
 
     if (parseResult.success) {
       setProducerErrors({});
@@ -154,37 +237,55 @@ export const RegisterPage: React.FC = () => {
     }
 
     const newErrors: FormErrors = {};
+    let firstCropErrorId: string | null = null;
+
     for (const issue of parseResult.error.issues) {
-      const field = issue.path[0] as keyof FormErrors;
-      if (!newErrors[field]) {
-        newErrors[field] = issue.message;
+      if (issue.path[0] === 'cropDimensions') {
+        const cropId = issue.path[1] as string;
+        const key = `cropDimension_${cropId}`;
+        if (!newErrors[key]) {
+          newErrors[key] = issue.message;
+          if (!firstCropErrorId) {
+            firstCropErrorId = cropId;
+          }
+        }
+      } else {
+        const field = issue.path[0] as keyof FormErrors;
+        if (!newErrors[field]) {
+          newErrors[field] = issue.message;
+        }
       }
     }
 
-    const fieldOrder: Array<{ field: keyof FormErrors; ref: React.RefObject<HTMLElement | null> }> = [
-      { field: 'fullName', ref: fullNameRef },
-      { field: 'email', ref: prodEmailRef },
-      { field: 'whatsapp', ref: prodWhatsappRef },
-      { field: 'password', ref: prodPasswordRef },
-      { field: 'farmName', ref: farmNameRef },
-      { field: 'state', ref: prodStateRef },
-      { field: 'city', ref: prodCityRef },
-      { field: 'crops', ref: cropsRef },
+    const fieldOrder: Array<{ field: keyof FormErrors; getRef: () => HTMLElement | null }> = [
+      { field: 'fullName', getRef: () => fullNameRef.current },
+      { field: 'email', getRef: () => prodEmailRef.current },
+      { field: 'whatsapp', getRef: () => prodWhatsappRef.current },
+      { field: 'password', getRef: () => prodPasswordRef.current },
+      { field: 'farmName', getRef: () => farmNameRef.current },
+      { field: 'state', getRef: () => prodStateRef.current },
+      { field: 'city', getRef: () => prodCityRef.current },
+      { field: 'crops', getRef: () => cropsRef.current },
     ];
 
-    let firstRef: React.RefObject<HTMLElement | null> | null = null;
-    for (const item of fieldOrder) {
-      if (newErrors[item.field]) {
-        firstRef = item.ref;
-        break;
-      }
+    const firstMatch = fieldOrder.find((item) => Boolean(newErrors[item.field]));
+    let firstRef: { current: HTMLElement | null } | null = firstMatch
+      ? { current: firstMatch.getRef() }
+      : null;
+
+    // Se os campos gerais estão válidos, focar no campo de área da cultura com pendência (Cenário 3)
+    if (!firstRef && firstCropErrorId && cropAreaRefs.current[firstCropErrorId]) {
+      firstRef = { current: cropAreaRefs.current[firstCropErrorId] };
     }
 
     setProducerErrors(newErrors);
     return { isValid: false, firstErrorRef: firstRef };
   };
 
-  const validateResellerForm = (): { isValid: boolean; firstErrorRef: React.RefObject<HTMLElement | null> | null } => {
+  const validateResellerForm = (): {
+    isValid: boolean;
+    firstErrorRef: { current: HTMLElement | null } | null;
+  } => {
     const parseResult = resellerRegistrationSchema.safeParse(resellerData);
 
     if (parseResult.success) {
@@ -200,26 +301,21 @@ export const RegisterPage: React.FC = () => {
       }
     }
 
-    const fieldOrder: Array<{ field: keyof ResellerFormErrors; ref: React.RefObject<HTMLElement | null> }> = [
-      { field: 'razaoSocial', ref: razaoSocialRef },
-      { field: 'nomeFantasia', ref: nomeFantasiaRef },
-      { field: 'cnpj', ref: cnpjRef },
-      { field: 'corporateEmail', ref: resellerEmailRef },
-      { field: 'whatsapp', ref: resellerWhatsappRef },
-      { field: 'password', ref: resellerPasswordRef },
-      { field: 'state', ref: resellerStateRef },
-      { field: 'city', ref: resellerCityRef },
-      { field: 'deliveryRadiusKm', ref: deliveryRadiusRef },
-      { field: 'categories', ref: categoriesRef },
+    const fieldOrder: Array<{ field: keyof ResellerFormErrors; getRef: () => HTMLElement | null }> = [
+      { field: 'razaoSocial', getRef: () => razaoSocialRef.current },
+      { field: 'nomeFantasia', getRef: () => nomeFantasiaRef.current },
+      { field: 'cnpj', getRef: () => cnpjRef.current },
+      { field: 'corporateEmail', getRef: () => resellerEmailRef.current },
+      { field: 'whatsapp', getRef: () => resellerWhatsappRef.current },
+      { field: 'password', getRef: () => resellerPasswordRef.current },
+      { field: 'state', getRef: () => resellerStateRef.current },
+      { field: 'city', getRef: () => resellerCityRef.current },
+      { field: 'deliveryRadiusKm', getRef: () => deliveryRadiusRef.current },
+      { field: 'categories', getRef: () => categoriesRef.current },
     ];
 
-    let firstRef: React.RefObject<HTMLElement | null> | null = null;
-    for (const item of fieldOrder) {
-      if (newErrors[item.field]) {
-        firstRef = item.ref;
-        break;
-      }
-    }
+    const firstResellerMatch = fieldOrder.find((item) => Boolean(newErrors[item.field]));
+    const firstRef = firstResellerMatch ? { current: firstResellerMatch.getRef() } : null;
 
     setResellerErrors(newErrors);
     return { isValid: false, firstErrorRef: firstRef };
@@ -239,9 +335,21 @@ export const RegisterPage: React.FC = () => {
       return;
     }
 
+    // Purge de culturas removidas antes de persistir
+    const cleanedDimensions: Record<string, CropDimensionInput> = {};
+    for (const c of producerData.crops) {
+      if (producerData.cropDimensions?.[c]) {
+        cleanedDimensions[c] = producerData.cropDimensions[c];
+      }
+    }
+    const finalData = {
+      ...producerData,
+      cropDimensions: cleanedDimensions,
+    };
+
     setIsSubmitting(true);
     try {
-      const res = await registerProducer(producerData);
+      const res = await registerProducer(finalData);
       if (res.success) {
         setLocation('/produtor/dashboard');
       } else {
@@ -574,12 +682,176 @@ export const RegisterPage: React.FC = () => {
                 <CropSelector
                   ref={cropsRef}
                   selectedCrops={producerData.crops}
-                  onChange={(crops) => {
-                    setProducerData({ ...producerData, crops });
-                    if (producerErrors.crops) setProducerErrors({ ...producerErrors, crops: undefined });
-                  }}
+                  onChange={handleCropsChange}
                   error={producerErrors.crops}
                 />
+
+                {/* Bloco Dinâmico de Dimensionamento por Cultura (US01.1) */}
+                {producerData.crops.length > 0 && (
+                  <div
+                    data-testid="crop-dimensions-section"
+                    className="mt-5 space-y-4 pt-4 border-t border-slate-200/80 animate-fade-in"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-agro-600" />
+                        <span>Dimensionamento e Escala por Cultura</span>
+                      </h3>
+                      <span className="text-xs text-slate-500 hidden sm:inline">
+                        Base para cotações e recomendações do Copiloto IA
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {producerData.crops.map((cropId) => {
+                        const cropObj = CROPS.find((c) => c.id === cropId);
+                        const cropName = cropObj?.name || getCropName(cropId);
+                        const dim = producerData.cropDimensions?.[cropId] || { area: '', plantsCount: '' };
+                        const errorMsg = producerErrors[`cropDimension_${cropId}`];
+
+                        // Escala calculada em tempo real para feedback instantâneo
+                        const areaNum = normalizeAreaInput(dim.area);
+                        const plantsNum = dim.plantsCount
+                          ? parseInt(String(dim.plantsCount).replace(/\D/g, ''), 10)
+                          : 0;
+                        const currentScale =
+                          areaNum > 0 || plantsNum > 0 ? calculateCropScale(areaNum, plantsNum) : null;
+
+                        return (
+                          <div
+                            key={cropId}
+                            data-testid={`crop-dimension-card-${cropId}`}
+                            className={`p-4 rounded-xl border transition-all duration-200 ${
+                              errorMsg
+                                ? 'border-red-300 bg-red-50/40 ring-1 ring-red-400'
+                                : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-agro-300'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl" role="img" aria-label={cropName}>
+                                  {cropObj?.icon || '🌱'}
+                                </span>
+                                <span className="font-semibold text-sm text-slate-900">{cropName}</span>
+                              </div>
+
+                              {/* Badge de Porte / Escala */}
+                              {currentScale && (
+                                <span
+                                  data-testid={`badge-scale-${cropId}`}
+                                  className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
+                                    currentScale === 'PEQUENA'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : currentScale === 'MEDIA'
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-blue-50 text-blue-700 border-blue-200'
+                                  }`}
+                                >
+                                  {currentScale === 'PEQUENA' && 'Pequena Escala'}
+                                  {currentScale === 'MEDIA' && 'Média Escala'}
+                                  {currentScale === 'GRANDE' && 'Grande Escala'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {/* Campo de Área Plantada (Hectares) */}
+                              <div>
+                                <label
+                                  htmlFor={`input-crop-area-${cropId}`}
+                                  className="block text-xs font-medium text-slate-700 mb-1"
+                                >
+                                  Área Plantada (Hectares) <span className="text-red-600 font-semibold">*</span>
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    ref={(el) => {
+                                      cropAreaRefs.current[cropId] = el;
+                                    }}
+                                    id={`input-crop-area-${cropId}`}
+                                    data-testid={`input-crop-area-${cropId}`}
+                                    aria-label={`Área plantada em hectares para ${cropName}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="Ex: 120 ou 0,75"
+                                    value={dim.area}
+                                    onChange={(e) =>
+                                      handleCropDimensionChange(cropId, 'area', e.target.value)
+                                    }
+                                    className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 ${
+                                      errorMsg
+                                        ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
+                                        : 'border-slate-300 focus:border-agro-600 focus:ring-agro-100'
+                                    }`}
+                                  />
+                                  <span className="absolute right-3 top-2 text-xs font-medium text-slate-400 pointer-events-none">
+                                    ha
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-slate-500 mt-1 block">
+                                  Suporta decimais (ex: 0.5 ou 0,75)
+                                </span>
+                              </div>
+
+                              {/* Campo Opcional: Número Estimado de Plantas / Pés */}
+                              <div>
+                                <label
+                                  htmlFor={`input-crop-plants-${cropId}`}
+                                  className="block text-xs font-medium text-slate-700 mb-1"
+                                >
+                                  Nº de Plantas / Pés <span className="text-slate-400 text-[10px] font-normal">(Opcional)</span>
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    id={`input-crop-plants-${cropId}`}
+                                    data-testid={`input-crop-plants-${cropId}`}
+                                    aria-label={`Número de pés ou estacas para ${cropName}`}
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="Ex: 800 pés ou estacas"
+                                    value={dim.plantsCount || ''}
+                                    onChange={(e) =>
+                                      handleCropDimensionChange(cropId, 'plantsCount', e.target.value)
+                                    }
+                                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-agro-600 focus:outline-none focus:ring-2 focus:ring-agro-100"
+                                  />
+                                  <span className="absolute right-3 top-2 text-xs font-medium text-slate-400 pointer-events-none">
+                                    un
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-slate-500 mt-1 block">
+                                  Auxilia na dosagem precisa pelo Copiloto IA
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Mensagem de Erro Inline da Cultura */}
+                            {errorMsg && (
+                              <p
+                                role="alert"
+                                data-testid={`error-crop-${cropId}`}
+                                className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1 animate-fade-in"
+                              >
+                                <svg
+                                  className="w-3.5 h-3.5 shrink-0 text-red-500"
+                                  fill="currentColor"
+                                  viewBox="0 0 20 20"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                {errorMsg}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Submissão */}
@@ -587,6 +859,7 @@ export const RegisterPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSubmitting}
+                  data-testid="btn-submit-producer"
                   className="w-full py-3.5 px-6 rounded-xl bg-agro-700 hover:bg-agro-800 active:bg-agro-900 text-white font-semibold text-base shadow-md shadow-agro-900/15 hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSubmitting ? (
@@ -852,6 +1125,16 @@ export const RegisterPage: React.FC = () => {
 
               {/* Submissão */}
               <div className="pt-4 border-t border-slate-100 space-y-4">
+                {resellerErrors.general && (
+                  <div
+                    role="alert"
+                    className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-center gap-2 animate-fade-in"
+                  >
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>{resellerErrors.general}</span>
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   onClick={handleResellerSubmit}

@@ -29,6 +29,8 @@ CREATE TABLE crops (
 
 INSERT INTO crops (name, slug) VALUES
     ('Café', 'cafe'),
+    ('Café Conilon', 'cafe-conilon'),
+    ('Café Arábica', 'cafe-arabica'),
     ('Cacau', 'cacau'),
     ('Pimenta-do-reino', 'pimenta-do-reino'),
     ('Mamão', 'mamao')
@@ -77,10 +79,13 @@ CREATE TABLE producers (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 6. TABELA ASSOCIATIVA N:N PRODUTOR <-> CULTURAS (3NF)
+-- 6. TABELA ASSOCIATIVA N:N PRODUTOR <-> CULTURAS (3NF - US01.1)
 CREATE TABLE producer_crops (
     producer_id UUID NOT NULL REFERENCES producers(id) ON DELETE CASCADE,
     crop_id UUID NOT NULL REFERENCES crops(id) ON DELETE CASCADE,
+    planted_area_hectares NUMERIC(10, 2) DEFAULT 0.00,
+    plants_count INTEGER,
+    scale VARCHAR(20) DEFAULT 'PEQUENA' CHECK (scale IN ('PEQUENA', 'MEDIA', 'GRANDE')),
     created_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (producer_id, crop_id)
 );

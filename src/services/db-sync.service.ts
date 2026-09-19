@@ -1,5 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { RegisterFormData, ResellerFormData } from '../types/user';
+import { normalizeAreaInput, calculateCropScale } from '../schemas/producer.schema';
+import { getCropName } from '../data/crops';
 
 export interface SyncResult {
   success: boolean;
@@ -69,19 +71,59 @@ export const dbSyncService = {
 
       const producerId = producer?.id;
 
-      // 3. Vincular culturas (N:N)
+      // 3. Vincular culturas (N:N - US01.1 com detalhamento dimensional)
       if (producerId && data.crops && data.crops.length > 0) {
+        // Mapear identificadores e nomes das culturas
+        const cropDisplayNames = data.crops.map((c) => getCropName(c));
+        const allKeys = Array.from(new Set([...data.crops, ...cropDisplayNames]));
+
         // Buscar IDs das culturas pelo nome
         const { data: cropsList } = await supabase
           .from('crops')
-          .select('id, name')
-          .in('name', data.crops);
+          .select('id, name, slug')
+          .in('name', allKeys);
 
         if (cropsList && cropsList.length > 0) {
-          const links = cropsList.map((c) => ({
-            producer_id: producerId,
-            crop_id: c.id,
-          }));
+          const links = cropsList.map((c) => {
+            const normalizeStr = (s?: string) =>
+              (s || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9]/g, '');
+
+            const cNameNorm = normalizeStr(c.name);
+            const cSlugNorm = normalizeStr(c.slug);
+
+            const dim =
+              data.cropDimensions?.[c.slug] ||
+              data.cropDimensions?.[c.name] ||
+              (data.cropDimensions
+                ? Object.entries(data.cropDimensions).find(([k]) => {
+                    const kNorm = normalizeStr(k);
+                    return (
+                      kNorm === cNameNorm ||
+                      kNorm === cSlugNorm ||
+                      cNameNorm.includes(kNorm) ||
+                      kNorm.includes(cNameNorm)
+                    );
+                  })?.[1]
+                : undefined);
+
+            const area = dim ? normalizeAreaInput(dim.area) : 0;
+            const plants = dim?.plantsCount
+              ? parseInt(String(dim.plantsCount).replace(/\D/g, ''), 10)
+              : null;
+            const scale = calculateCropScale(area, plants);
+
+            return {
+              producer_id: producerId,
+              crop_id: c.id,
+              planted_area_hectares: area,
+              plants_count: plants || null,
+              scale,
+            };
+          });
 
           await supabase
             .from('producer_crops')

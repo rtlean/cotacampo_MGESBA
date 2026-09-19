@@ -60,10 +60,25 @@ describe('dbSyncService - Sincronização de Tabelas no Supabase (3NF)', () => {
         state: 'MG',
         city: 'Manhuaçu',
         crops: ['cafe'],
+        cropDimensions: {
+          cafe: { area: '12.5', plantsCount: '5000' },
+        },
       });
 
       expect(result.success).toBe(true);
       expect(result.id).toBe('mock-producer-uuid');
+      expect(upsertProducerCropsMock).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            producer_id: 'mock-producer-uuid',
+            crop_id: 'crop-1',
+            planted_area_hectares: 12.5,
+            plants_count: 5000,
+            scale: 'MEDIA',
+          }),
+        ]),
+        { onConflict: 'producer_id,crop_id' }
+      );
     });
 
     it('deve capturar erro se o Supabase falhar na inserção de profiles', async () => {

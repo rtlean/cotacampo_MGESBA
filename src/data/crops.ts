@@ -1,12 +1,21 @@
-import { CropInfo } from '../types/user';
+import { CropInfo, CropId } from '../types/user';
 
 export const CROPS: CropInfo[] = [
   {
-    id: 'cafe',
-    name: 'Café',
-    subtitle: 'Conilon e Arábica',
+    id: 'cafe_conilon',
+    name: 'Café Conilon',
+    subtitle: 'Robusta Tropical',
     icon: '☕',
     color: '#78350F',
+    badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
+    borderColor: 'border-amber-600',
+  },
+  {
+    id: 'cafe_arabica',
+    name: 'Café Arábica',
+    subtitle: 'Variedades de Altitude',
+    icon: '☕',
+    color: '#92400E',
     badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
     borderColor: 'border-amber-600',
   },
@@ -38,3 +47,23 @@ export const CROPS: CropInfo[] = [
     borderColor: 'border-yellow-600',
   },
 ];
+
+export function getCropName(id: CropId | string): string {
+  switch (id) {
+    case 'cafe_conilon':
+      return 'Café Conilon';
+    case 'cafe_arabica':
+      return 'Café Arábica';
+    case 'cafe':
+      return 'Café';
+    case 'cacau':
+      return 'Cacau';
+    case 'pimenta':
+    case 'pimenta_reino':
+      return 'Pimenta-do-reino';
+    case 'mamao':
+      return 'Mamão';
+    default:
+      return id;
+  }
+}

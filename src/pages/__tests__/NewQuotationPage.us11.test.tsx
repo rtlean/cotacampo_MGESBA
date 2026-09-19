@@ -86,8 +86,10 @@ describe('US11 – Assistente IA de Dimensionamento e Recomendação no Wizard',
       const qtyInput = screen.getByLabelText(/Quantidade/i);
       const unitSelect = screen.getByLabelText(/Unidade/i);
 
-      expect(qtyInput).toHaveValue(45);
-      expect(unitSelect).toHaveValue('L');
+      await waitFor(() => {
+        expect(qtyInput).toHaveValue(45);
+        expect(unitSelect).toHaveValue('L');
+      });
 
       // Verifica o resumo explicativo oficial
       const explanation = screen.getByTestId('ai-dose-explanation');
@@ -125,8 +127,10 @@ describe('US11 – Assistente IA de Dimensionamento e Recomendação no Wizard',
       fireEvent.click(screen.getByTestId('btn-ai-calculate-dose'));
 
       // Verifica 90 Sacas e explicação
-      expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(90);
-      expect(screen.getByLabelText(/Unidade/i)).toHaveValue('Sc');
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(90);
+        expect(screen.getByLabelText(/Unidade/i)).toHaveValue('Sc');
+      });
       expect(screen.getByTestId('ai-dose-explanation')).toHaveTextContent(
         'Dose recomendada de 6 Sc/ha para 15 ha com aplicação tratorada/fertirrigação'
       );
@@ -160,7 +164,9 @@ describe('US11 – Assistente IA de Dimensionamento e Recomendação no Wizard',
       fireEvent.click(screen.getByTestId('btn-ai-calculate-dose'));
 
       // 10 ha * 3.0 L/ha = 30 L
-      expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(30);
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(30);
+      });
       expect(screen.getByTestId('ai-dose-explanation')).toHaveTextContent(
         'Dose recomendada de 3.0 L/ha para 10 ha com aplicação tratorada/fertirrigação'
       );
@@ -332,7 +338,9 @@ describe('US11 – Assistente IA de Dimensionamento e Recomendação no Wizard',
       fireEvent.change(productInput, { target: { value: 'Azoxistrobina 250 SC' } });
       fireEvent.click(screen.getByTestId('btn-ai-calculate-dose'));
 
-      expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(45);
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Quantidade/i)).toHaveValue(45);
+      });
 
       // Clica em [ Adicionar Item ]
       const addItemBtn = screen.getByRole('button', { name: /Adicionar Item/i });

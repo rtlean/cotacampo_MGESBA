@@ -28,6 +28,8 @@ import { TARGET_CROPS } from '../data/target-crops';
 import { searchCatalogProducts, CatalogProduct } from '../data/products';
 import { quotationService } from '../services/quotation.service';
 import { agronomicAiService, PhytosanitaryRestriction } from '../services/agronomic-ai.service';
+import { copilotService } from '../server/services/copilot.service';
+import { CropCopilotOutput } from '../shared/schemas/copilot';
 import {
   step1DestinationSchema,
   step3CommercialSchema,
@@ -62,11 +64,13 @@ export const NewQuotationPage: React.FC = () => {
   const [itemError, setItemError] = useState<string | null>(null);
   const [step2Error, setStep2Error] = useState<string | null>(null);
 
-  // US11: Assistente IA de Dimensionamento e Recomendação (Copiloto IA)
+  // US11 / US11.1: Assistente IA de Dimensionamento e Recomendação (Copiloto IA tRPC)
   const [talhaoArea, setTalhaoArea] = useState<string>('15');
   const [talhaoSpacing, setTalhaoSpacing] = useState<string>('3000');
   const [aiDoseExplanation, setAiDoseExplanation] = useState<string | null>(null);
   const [aiRestriction, setAiRestriction] = useState<PhytosanitaryRestriction | null>(null);
+  const [isCalculatingAi, setIsCalculatingAi] = useState<boolean>(false);
+  const [aiDosageResult, setAiDosageResult] = useState<CropCopilotOutput | null>(null);
 
   // Receituário Agronômico
   const [prescription, setPrescription] = useState<RecipeAttachment | null>(null);
@@ -227,8 +231,8 @@ export const NewQuotationPage: React.FC = () => {
     setAiRestriction(check.hasRestriction ? check : null);
   };
 
-  // US11 - Cenário 1: Cálculo automático de volume por área e cultura
-  const handleCalculateDoseWithAi = () => {
+  // US11 / US11.1 - Cálculo automático de volume por área e cultura (Copiloto IA tRPC)
+  const handleCalculateDoseWithAi = async () => {
     const query = productQuery.trim() || selectedProduct?.name || '';
     if (!query) {
       setItemError('Informe o produto ou princípio ativo para calcular a dosagem com IA.');
@@ -237,18 +241,122 @@ export const NewQuotationPage: React.FC = () => {
 
     const area = parseFloat(talhaoArea.replace(',', '.')) || 15;
     const spacing = parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000;
+    const state = (producerUser?.state as 'MG' | 'ES' | 'BA') || 'ES';
 
-    const calculation = agronomicAiService.calculateDosage({
-      cropId: selectedCrop,
-      productNameOrActive: query,
-      areaHectares: area,
-      plantsPerHectare: spacing,
+    const normalizedCrop = (selectedCrop || 'cafe_conilon').replace(/-/g, '_') as
+      | 'cafe_conilon'
+      | 'cafe_arabica'
+      | 'cacau'
+      | 'pimenta_reino'
+      | 'mamao';
+
+    try {
+      setIsCalculatingAi(true);
+      const result = await copilotService.calculateDosage({
+        cropType: normalizedCrop,
+        areaHectares: area,
+        plantCount: spacing,
+        productOrActiveIngredient: query,
+        state,
+      });
+
+      setAiDosageResult(result);
+      setQuantityInput(String(result.recommendedQuantity));
+      const mappedUnit =
+        result.unit === 'Litros'
+          ? 'L'
+          : result.unit === 'Sacas'
+          ? 'Sc'
+          : result.unit === 'Toneladas'
+          ? 'Ton'
+          : result.unit;
+      setUnitInput(mappedUnit);
+      setAiDoseExplanation(`Dose recomendada de ${result.dosagePerHectare} para ${area} ha com aplicação tratorada/fertirrigação`);
+
+      if (result.isLmrRestricted) {
+        setAiRestriction({
+          hasRestriction: true,
+          cropId: selectedCrop,
+          activeIngredient: query,
+          warningMessage: result.warningMessage || 'Restrição severa de LMR e exportação.',
+          recommendedAlternative: result.suggestedAlternatives?.[0]
+            ? {
+                id: 'alt-1',
+                name: result.suggestedAlternatives[0],
+                category: 'Defensivos',
+                activeIngredient: 'Princípio Ativo Registrado',
+                defaultUnit: 'L',
+              }
+            : undefined,
+        });
+      } else {
+        setAiRestriction(null);
+      }
+      setItemError(null);
+    } catch (err) {
+      console.warn('Erro na chamada do Copiloto IA, utilizando fallback local:', err);
+      const calculation = agronomicAiService.calculateDosage({
+        cropId: selectedCrop,
+        productNameOrActive: query,
+        areaHectares: area,
+        plantsPerHectare: spacing,
+      });
+      setQuantityInput(String(calculation.recommendedQuantity));
+      setUnitInput(calculation.recommendedUnit);
+      setAiDoseExplanation(calculation.explanation);
+    } finally {
+      setIsCalculatingAi(false);
+    }
+  };
+
+  // US11.1 - Seleção de alternativa fitossanitária sugerida em chips
+  const handleSelectAlternativeName = (altName: string) => {
+    setProductQuery(altName);
+    setSelectedProduct({
+      id: `alt-${altName.toLowerCase().replace(/\s+/g, '-')}`,
+      name: altName,
+      category: 'Defensivos',
+      activeIngredient: altName,
+      defaultUnit: 'L',
     });
-
-    setQuantityInput(String(calculation.recommendedQuantity));
-    setUnitInput(calculation.recommendedUnit);
-    setAiDoseExplanation(calculation.explanation);
+    setAiRestriction(null);
     setItemError(null);
+
+    const area = parseFloat(talhaoArea.replace(',', '.')) || 15;
+    const spacing = parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000;
+    const state = (producerUser?.state as 'MG' | 'ES' | 'BA') || 'ES';
+    const normalizedCrop = (selectedCrop || 'cafe_conilon').replace(/-/g, '_') as
+      | 'cafe_conilon'
+      | 'cafe_arabica'
+      | 'cacau'
+      | 'pimenta_reino'
+      | 'mamao';
+
+    copilotService
+      .calculateDosage({
+        cropType: normalizedCrop,
+        areaHectares: area,
+        plantCount: spacing,
+        productOrActiveIngredient: altName,
+        state,
+      })
+      .then((res) => {
+        setAiDosageResult(res);
+        setQuantityInput(String(res.recommendedQuantity));
+        const mappedUnit =
+          res.unit === 'Litros'
+            ? 'L'
+            : res.unit === 'Sacas'
+            ? 'Sc'
+            : res.unit === 'Toneladas'
+            ? 'Ton'
+            : res.unit;
+        setUnitInput(mappedUnit);
+        setAiDoseExplanation(`Dose recomendada de ${res.dosagePerHectare} para ${area} ha com aplicação tratorada/fertirrigação`);
+      })
+      .catch((err) => {
+        console.warn('Erro ao recalcular dose da alternativa:', err);
+      });
   };
 
   // US11 - Cenário 2: Substituição com 1 clique por alternativa segura recomendada
@@ -851,6 +959,23 @@ export const NewQuotationPage: React.FC = () => {
                       <span>Substituir por Alternativa Recomendada</span>
                     </button>
                   )}
+
+                  {aiDosageResult?.suggestedAlternatives && aiDosageResult.suggestedAlternatives.length > 0 && (
+                    <div className="w-full flex flex-wrap items-center gap-1.5 pt-2 border-t border-amber-200/60 mt-1">
+                      <span className="text-xs text-amber-900 font-bold">Alternativas de baixo resíduo:</span>
+                      {aiDosageResult.suggestedAlternatives.map((alt) => (
+                        <button
+                          key={alt}
+                          type="button"
+                          data-testid={`chip-alt-${alt.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
+                          onClick={() => handleSelectAlternativeName(alt)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold text-xs border border-amber-300 transition-colors cursor-pointer"
+                        >
+                          {alt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -880,12 +1005,13 @@ export const NewQuotationPage: React.FC = () => {
 
                   <button
                     type="button"
+                    disabled={isCalculatingAi}
                     onClick={handleCalculateDoseWithAi}
                     data-testid="btn-ai-calculate-dose"
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-agro-700 to-emerald-700 hover:from-agro-800 hover:to-emerald-800 text-white font-bold text-xs shadow-sm transition-all cursor-pointer shrink-0"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-agro-700 to-emerald-700 hover:from-agro-800 hover:to-emerald-800 text-white font-bold text-xs shadow-sm transition-all cursor-pointer shrink-0 disabled:opacity-60"
                   >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Calcular Dosagem com IA</span>
+                    <Sparkles className={`w-4 h-4 ${isCalculatingAi ? 'animate-spin' : ''}`} />
+                    <span>{isCalculatingAi ? 'Calculando com IA...' : 'Calcular Dosagem com IA'}</span>
                   </button>
                 </div>
 
@@ -928,6 +1054,20 @@ export const NewQuotationPage: React.FC = () => {
                   >
                     <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                     <span>{aiDoseExplanation}</span>
+                  </div>
+                )}
+
+                {aiDosageResult && (
+                  <div
+                    data-testid="ai-copilot-result-card"
+                    className="p-3 bg-emerald-100/90 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-semibold space-y-1 animate-fade-in"
+                  >
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span className="font-bold">Dosagem Recomendada: {aiDosageResult.dosagePerHectare}</span>
+                      <span className="text-emerald-800">({aiDosageResult.recommendedQuantity} {aiDosageResult.unit})</span>
+                    </div>
+                    <p className="text-emerald-800 font-normal">{aiDosageResult.justification}</p>
                   </div>
                 )}
               </div>
@@ -976,9 +1116,22 @@ export const NewQuotationPage: React.FC = () => {
 
                 {/* Quantidade */}
                 <div className="md:col-span-3">
-                  <label htmlFor="item-quantity" className="block text-xs font-bold text-slate-700 mb-1">
-                    Quantidade <span className="text-red-600 font-semibold">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="item-quantity" className="block text-xs font-bold text-slate-700">
+                      Quantidade <span className="text-red-600 font-semibold">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={isCalculatingAi}
+                      onClick={handleCalculateDoseWithAi}
+                      data-testid="btn-ai-calc-inline"
+                      className="text-[11px] text-agro-700 hover:text-agro-800 font-bold flex items-center gap-1 cursor-pointer"
+                      title="Calcular com IA"
+                    >
+                      <Sparkles className="w-3 h-3 text-harvest-500" />
+                      <span>Calcular com IA</span>
+                    </button>
+                  </div>
                   <input
                     id="item-quantity"
                     type="number"

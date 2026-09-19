@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Building2,
   MapPin,
   Calendar,
@@ -23,6 +24,11 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { quotationService } from '../services/quotation.service';
+import {
+  predictiveAnalysisService,
+  FinancialOpinionResult,
+  LogisticalRiskResult,
+} from '../services/predictive-analysis.service';
 import {
   QuotationRequest,
   QuotationBid,
@@ -50,6 +56,11 @@ export const QuotationComparativePage: React.FC = () => {
   const [acceptSuccess, setAcceptSuccess] = useState<boolean>(false);
   const [accepting, setAccepting] = useState<boolean>(false);
 
+  // US12: Estados de Análise Preditiva da IA
+  const [financialOpinion, setFinancialOpinion] = useState<FinancialOpinionResult | null>(null);
+  const [logisticalRisk, setLogisticalRisk] = useState<LogisticalRiskResult | null>(null);
+  const [showFinancialOpinion, setShowFinancialOpinion] = useState<boolean>(false);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -76,6 +87,13 @@ export const QuotationComparativePage: React.FC = () => {
           const comparative = quotationService.calculateComparativeAnalysis(quote, fetchedBids);
           setAnalysis(comparative);
 
+          // US12: Execução das análises preditivas (Risco Logístico e Modalidades Financeiras)
+          const risk = predictiveAnalysisService.analyzeLogisticalRisk(quote, fetchedBids);
+          setLogisticalRisk(risk);
+
+          const finOpinion = predictiveAnalysisService.analyzeFinancialModalities(quote, fetchedBids);
+          setFinancialOpinion(finOpinion);
+
           // Verifica se a cotação já foi finalizada/premiada
           const summaries = quotationService.getAwardedResellersSummary(quote, fetchedBids);
           setAwardedSummaries(summaries);
@@ -100,6 +118,15 @@ export const QuotationComparativePage: React.FC = () => {
       isMounted = false;
     };
   }, [quotationId]);
+
+  // US12 CENÁRIO 1: Consulta do Parecer da IA
+  const handleConsultAiOpinion = () => {
+    if (!financialOpinion && quotation && bids.length >= 2) {
+      const res = predictiveAnalysisService.analyzeFinancialModalities(quotation, bids);
+      setFinancialOpinion(res);
+    }
+    setShowFinancialOpinion(true);
+  };
 
   // Formatação de moeda BRL
   const formatCurrency = (val: number): string => {
@@ -298,7 +325,17 @@ export const QuotationComparativePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConsultAiOpinion}
+              data-testid="btn-consult-ai-opinion"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-harvest-400" />
+              <span>[ Consultar Parecer da IA ]</span>
+            </button>
+
             <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-xs text-xs text-slate-600 flex items-center gap-2">
               <MapPin className="w-3.5 h-3.5 text-agro-600" />
               <span>
@@ -338,6 +375,92 @@ export const QuotationComparativePage: React.FC = () => {
             >
               Fechar
             </button>
+          </div>
+        )}
+
+        {/* US12 CENÁRIO 2: Bandeira de Risco Logístico vs Janela Agronômica */}
+        {logisticalRisk?.hasLogisticalRisk && (
+          <div
+            data-testid="ai-logistical-risk-card"
+            className="bg-amber-50 border-2 border-amber-500 text-amber-950 rounded-2xl p-5 shadow-soft flex items-start gap-4 animate-fade-in"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-md bg-amber-200 text-amber-900 text-[11px] font-black uppercase tracking-wide">
+                  Alerta Agronômico & Logístico
+                </span>
+                <h4 className="text-sm font-black text-amber-950">
+                  Bandeira de Risco: Prazo de Entrega vs. Janela de Aplicação
+                </h4>
+              </div>
+              <p className="text-xs sm:text-sm font-semibold text-amber-900 leading-relaxed max-w-4xl">
+                {logisticalRisk.warningMessage}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* US12 CENÁRIO 1: Card Parecer da IA (Modalidade Financeira: À Vista vs. Prazo Safra) */}
+        {showFinancialOpinion && financialOpinion?.hasAnalysis && (
+          <div
+            data-testid="ai-financial-opinion-card"
+            className="bg-gradient-to-r from-agro-900 via-slate-900 to-agro-950 text-white rounded-2xl p-6 shadow-xl border border-agro-700 space-y-4 animate-fade-in"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-harvest-400 to-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-md">
+                  <Sparkles className="w-6 h-6 fill-slate-950" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-harvest-400 bg-harvest-400/10 px-2 py-0.5 rounded border border-harvest-400/20">
+                    Inteligência Financeira CotaCampo
+                  </span>
+                  <h3 className="text-lg font-black text-white mt-0.5">
+                    Parecer da IA – Modalidade Financeira & Custo de Oportunidade
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFinancialOpinion(false)}
+                className="text-white/60 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors self-end sm:self-auto cursor-pointer"
+                aria-label="Fechar parecer da IA"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Parecer oficial formatado */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-5">
+              <p className="text-sm sm:text-base font-medium text-slate-100 leading-relaxed">
+                "{financialOpinion.opinionText}"
+              </p>
+            </div>
+
+            {/* Métricas e Detalhes */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
+              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                <span className="text-slate-400 block">Juros Implícitos a Prazo:</span>
+                <span className="text-base font-extrabold text-amber-400">
+                  {financialOpinion.implicitMonthlyRate.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}% a.m.
+                </span>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                <span className="text-slate-400 block">Crédito de Custeio / CDI:</span>
+                <span className="text-base font-extrabold text-slate-200">
+                  {financialOpinion.marketMonthlyRate.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}% a.m.
+                </span>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                <span className="text-slate-400 block">Economia à Vista:</span>
+                <span className="text-base font-extrabold text-emerald-400">
+                  R$ {financialOpinion.savingsCashAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -444,6 +567,15 @@ export const QuotationComparativePage: React.FC = () => {
               <Zap className="w-3.5 h-3.5 text-blue-600" />
               Entrega Mais Rápida
             </span>
+            <button
+              type="button"
+              onClick={handleConsultAiOpinion}
+              data-testid="btn-consult-ai-opinion-banner"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-agro-700 hover:bg-agro-800 text-white font-bold cursor-pointer transition-colors shadow-xs"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-harvest-400" />
+              <span>[ Consultar Parecer da IA ]</span>
+            </button>
           </div>
         </div>
 

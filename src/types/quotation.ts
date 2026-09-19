@@ -27,6 +27,8 @@ export interface QuotationRequest {
   proposalLimitHours?: number;
   displayCode?: string;
   notes?: string;
+  agronomicWindow?: string;
+  applicationDeadlineDays?: number;
   items?: QuotationItem[];
   itemsCount?: number;
   bidsCount?: number;
@@ -139,6 +141,12 @@ export interface QuotationBid {
   totalAmount: number;
   status: BidStatus;
   awardType?: BidAwardType;
+  paymentMethod?: 'CASH' | 'TERM_HARVEST' | 'BARTER' | 'STANDARD' | string;
+  paymentTerms?: string;
+  cashDiscountPercent?: number;
+  cashPriceTotal?: number;
+  termPriceTotal?: number;
+  interestRateMonthly?: number;
   notes?: string;
   createdAt: string;
 }

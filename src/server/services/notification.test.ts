@@ -347,6 +347,7 @@ describe('US16 - WhatsAppService (Serviço de Notificação via WhatsApp para Re
       const parsedBody = JSON.parse(calledOptions.body);
       expect(parsedBody).toEqual({
         number: '5527998881001',
+        text: 'Mensagem teste de cotação',
         options: {
           delay: 1200,
           presence: 'composing',

@@ -94,6 +94,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
 
     const requestBody = {
       number: targetNumber,
+      text: payload.message,
       options: {
         delay: 1200,
         presence: 'composing' as const,

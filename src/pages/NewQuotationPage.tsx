@@ -96,6 +96,9 @@ export const NewQuotationPage: React.FC = () => {
   const [isSavePackageModalOpen, setIsSavePackageModalOpen] = useState<boolean>(false);
   const [packageSuccessToast, setPackageSuccessToast] = useState<string | null>(null);
   const [loadedPackageName, setLoadedPackageName] = useState<string | null>(null);
+  // US18: Recálculo de dosagem de item pré-carregado com IA
+  const [recalculatingItemId, setRecalculatingItemId] = useState<string | null>(null);
+  const [itemAiToast, setItemAiToast] = useState<string | null>(null);
 
   // Inicialização de fazendas e recuperação de rascunho / pacote
   useEffect(() => {
@@ -131,7 +134,8 @@ export const NewQuotationPage: React.FC = () => {
           if (loadedFarms.length > 0) {
             setSelectedFarmId(loadedFarms[0].id);
           }
-          setCurrentStep(2);
+          const targetStep = urlParams?.get('step') === '2' ? 2 : 1;
+          setCurrentStep(targetStep);
         }
       });
       return;
@@ -493,6 +497,98 @@ export const NewQuotationPage: React.FC = () => {
     });
   };
 
+  // US18 - Cenário 2: Recalcular dosagem com IA em item individual da tabela baseado na nova área
+  const handleRecalculateItemDoseWithAi = async (itemId?: string) => {
+    if (!itemId) return;
+    const targetItem = items.find((it) => it.id === itemId);
+    if (!targetItem) return;
+
+    const area = parseFloat(talhaoArea.replace(',', '.')) || 15;
+    const spacing = parseInt(talhaoSpacing.replace(/\D/g, ''), 10) || 3000;
+    const state = (producerUser?.state as 'MG' | 'ES' | 'BA') || 'ES';
+
+    const normalizedCrop = (selectedCrop || 'cafe_conilon').replace(/-/g, '_') as
+      | 'cafe_conilon'
+      | 'cafe_arabica'
+      | 'cacau'
+      | 'pimenta_reino'
+      | 'mamao';
+
+    try {
+      setRecalculatingItemId(itemId);
+      const result = await copilotService.calculateDosage({
+        cropType: normalizedCrop,
+        areaHectares: area,
+        plantCount: spacing,
+        productOrActiveIngredient: targetItem.productName,
+        state,
+      });
+
+      const mappedUnit =
+        result.unit === 'Litros'
+          ? 'L'
+          : result.unit === 'Sacas'
+          ? 'Sc'
+          : result.unit === 'Toneladas'
+          ? 'Ton'
+          : result.unit;
+
+      const updated = items.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              quantity: result.recommendedQuantity,
+              unit: mappedUnit,
+            }
+          : it
+      );
+      setItems(updated);
+
+      const draft = quotationService.getDraft() || {};
+      quotationService.saveDraft({
+        ...draft,
+        items: updated,
+      });
+
+      setItemAiToast(
+        `Dose recalculada com IA para "${targetItem.productName}": ${result.recommendedQuantity} ${mappedUnit} (${area} ha)`
+      );
+      setTimeout(() => setItemAiToast(null), 5000);
+    } catch (err) {
+      console.warn('Erro ao recalcular dose do item com Copiloto IA, usando fallback local:', err);
+      const fallbackCalc = agronomicAiService.calculateDosage({
+        cropId: selectedCrop,
+        productNameOrActive: targetItem.productName,
+        areaHectares: area,
+        plantsPerHectare: spacing,
+      });
+
+      const updated = items.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              quantity: fallbackCalc.recommendedQuantity,
+              unit: fallbackCalc.recommendedUnit,
+            }
+          : it
+      );
+      setItems(updated);
+
+      const draft = quotationService.getDraft() || {};
+      quotationService.saveDraft({
+        ...draft,
+        items: updated,
+      });
+
+      setItemAiToast(
+        `Dose recalculada com IA para "${targetItem.productName}": ${fallbackCalc.recommendedQuantity} ${fallbackCalc.recommendedUnit} (${area} ha)`
+      );
+      setTimeout(() => setItemAiToast(null), 5000);
+    } finally {
+      setRecalculatingItemId(null);
+    }
+  };
+
   // Upload do Receituário Agronômico
   const handlePrescriptionUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPrescriptionError(null);
@@ -763,6 +859,35 @@ export const NewQuotationPage: React.FC = () => {
               )}
             </div>
 
+            {/* US18: Banner informativo de Pacote Tecnológico selecionado no Passo 1 */}
+            {loadedPackageName && (
+              <div
+                role="status"
+                data-testid="loaded-package-banner-step1"
+                className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 text-xs text-emerald-800 flex items-center justify-between gap-3 animate-fade-in"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Package className="w-5 h-5 text-emerald-700 shrink-0" />
+                  <div>
+                    <span className="font-bold text-emerald-950 text-sm block sm:inline">
+                      Pacote Tecnológico selecionado: "{loadedPackageName}"
+                    </span>{' '}
+                    <span className="text-slate-600 block sm:inline mt-0.5 sm:mt-0">
+                      — Confirme a fazenda de destino e avance para conferir a lista de insumos pré-carregada.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLoadedPackageName(null)}
+                  className="text-emerald-700 hover:text-emerald-900 text-xs font-bold shrink-0 p-1"
+                  title="Descartar pacote"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Seção 1: Seleção da Propriedade */}
             <div className="bg-white rounded-2xl shadow-soft border border-slate-200/80 p-6 sm:p-8 space-y-4">
               <div className="flex items-center justify-between">
@@ -878,6 +1003,33 @@ export const NewQuotationPage: React.FC = () => {
                   <span>{step1Errors.targetCrop}</span>
                 </p>
               )}
+            </div>
+
+            {/* US18: Seção 3: Dimensões da Área Plantada (Usado pelo Copiloto IA para Ajustes de Volume) */}
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-200/80 p-6 sm:p-8 space-y-4">
+              <div className="flex items-center justify-between">
+                <label htmlFor="step1-talhao-area" className="block text-sm font-bold text-slate-900">
+                  Área Plantada / Manejo (hectares)
+                </label>
+                <span className="text-xs text-agro-700 font-semibold bg-agro-50 px-2.5 py-1 rounded-full border border-agro-200 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-harvest-500" />
+                  <span>Usado pelo Copiloto IA</span>
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Informe a área atual do talhão para que a IA recalcule automaticamente dosagens e volumes dos insumos.
+              </p>
+              <div className="max-w-xs">
+                <input
+                  id="step1-talhao-area"
+                  data-testid="input-step1-area"
+                  type="text"
+                  value={talhaoArea}
+                  onChange={(e) => setTalhaoArea(e.target.value)}
+                  placeholder="Ex: 15"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 text-slate-900 text-sm font-semibold focus:border-agro-600 focus:ring-2 focus:ring-agro-100 outline-none transition-all"
+                />
+              </div>
             </div>
 
             {/* Ações Passo 1 */}
@@ -1297,6 +1449,27 @@ export const NewQuotationPage: React.FC = () => {
               </div>
             )}
 
+            {/* US18: Toast de Recálculo de Dosagem com IA por Item */}
+            {itemAiToast && (
+              <div
+                role="status"
+                data-testid="item-ai-toast"
+                className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 text-xs text-amber-900 flex items-center justify-between gap-2 animate-fade-in"
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="font-semibold">{itemAiToast}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setItemAiToast(null)}
+                  className="text-amber-700 hover:text-amber-950 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Tabela Dinâmica de Itens da Cotação */}
             <div className="bg-white rounded-2xl shadow-soft border border-slate-200/80 p-6 sm:p-8 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1376,14 +1549,28 @@ export const NewQuotationPage: React.FC = () => {
                             )}
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItem(item.id)}
-                              aria-label={`Excluir ${item.productName}`}
-                              className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleRecalculateItemDoseWithAi(item.id)}
+                                disabled={recalculatingItemId === item.id}
+                                data-testid={`btn-recalculate-item-ai-${item.id}`}
+                                title="Calcular Dosagem com IA"
+                                aria-label={`Calcular Dosagem com IA para ${item.productName}`}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-agro-700 hover:text-agro-900 bg-agro-50 hover:bg-agro-100 border border-agro-200 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-harvest-500 shrink-0" />
+                                <span className="hidden sm:inline">Calcular com IA</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(item.id)}
+                                aria-label={`Excluir ${item.productName}`}
+                                className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

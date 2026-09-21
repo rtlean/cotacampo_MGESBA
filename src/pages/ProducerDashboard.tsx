@@ -511,7 +511,7 @@ export const ProducerDashboard: React.FC = () => {
                           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold shadow-xs hover:shadow transition-all"
                         >
                           <Zap className="w-3.5 h-3.5 text-harvest-400" />
-                          <span>Nova Cotação com este Pacote</span>
+                          <span>[ Cotar Novamente ]</span>
                         </Link>
                       </div>
                     </div>

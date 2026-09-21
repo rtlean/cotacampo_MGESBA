@@ -175,7 +175,7 @@ describe('US17 – Salvar Cotação como Pacote Tecnológico no Wizard e Recompr
 
     vi.spyOn(packageService, 'getPackageById').mockResolvedValue(mockPackage);
 
-    window.history.pushState({}, '', '/produtor/cotacoes/nova?packageId=pkg_cafe_florada');
+    window.history.pushState({}, '', '/produtor/cotacoes/nova?packageId=pkg_cafe_florada&step=2');
     localStorage.setItem('cotacampo_auth_user', JSON.stringify(mockProducer));
 
     render(

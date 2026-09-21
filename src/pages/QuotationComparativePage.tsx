@@ -23,7 +23,9 @@ import {
   ShoppingCart,
   ExternalLink,
   CreditCard,
+  Package,
 } from 'lucide-react';
+import { SavePackageModal } from '../components/SavePackageModal';
 import { quotationService } from '../services/quotation.service';
 import {
   predictiveAnalysisService,
@@ -61,6 +63,10 @@ export const QuotationComparativePage: React.FC = () => {
   const [financialOpinion, setFinancialOpinion] = useState<FinancialOpinionResult | null>(null);
   const [logisticalRisk, setLogisticalRisk] = useState<LogisticalRiskResult | null>(null);
   const [showFinancialOpinion, setShowFinancialOpinion] = useState<boolean>(false);
+
+  // US17: Estados do Pacote Tecnológico
+  const [isSavePackageModalOpen, setIsSavePackageModalOpen] = useState<boolean>(false);
+  const [savePackageSuccessMessage, setSavePackageSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -256,8 +262,8 @@ export const QuotationComparativePage: React.FC = () => {
   const totalRequestedItems = quotation.items?.length || 0;
   const selectedCount = Object.keys(selectedItems).length;
 
-  // Se houver menos de 2 propostas
-  if (bids.length < 2) {
+  // Se houver menos de 2 propostas e a cotação não estiver concluída
+  if (bids.length < 2 && quotation.status !== 'AWARDED') {
     return (
       <div className="min-h-[calc(100vh-4rem)] py-8 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-sand-50 via-agro-50/10 to-sand-50">
         <div className="max-w-5xl mx-auto space-y-6">
@@ -344,10 +350,21 @@ export const QuotationComparativePage: React.FC = () => {
               </span>
             </div>
             {quotation.status === 'AWARDED' && (
-              <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-                Cotação Concluída
-              </span>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsSavePackageModalOpen(true)}
+                  data-testid="btn-save-as-package"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-xs transition-all cursor-pointer"
+                >
+                  <Package className="w-4 h-4 text-amber-700" />
+                  <span>[ Salvar como Pacote Tecnológico ]</span>
+                </button>
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+                  Cotação Concluída
+                </span>
+              </>
             )}
           </div>
         </div>
@@ -372,6 +389,32 @@ export const QuotationComparativePage: React.FC = () => {
             <button
               type="button"
               onClick={() => setAcceptSuccess(false)}
+              className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 p-1.5 rounded-lg hover:bg-emerald-100"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+
+        {/* US17: Alerta de Sucesso ao Salvar Pacote Tecnológico */}
+        {savePackageSuccessMessage && (
+          <div
+            role="status"
+            data-testid="save-package-success-alert"
+            className="bg-emerald-50 border-2 border-emerald-500 text-emerald-900 rounded-2xl p-4 shadow-soft flex items-center justify-between gap-4 animate-fade-in"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold">Pacote Tecnológico Salvo!</h4>
+                <p className="text-xs text-emerald-700">{savePackageSuccessMessage}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSavePackageSuccessMessage(null)}
               className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 p-1.5 rounded-lg hover:bg-emerald-100"
             >
               Fechar
@@ -1284,6 +1327,31 @@ export const QuotationComparativePage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* US17: Modal para Salvar Cotação como Pacote Tecnológico */}
+      {quotation && (
+        <SavePackageModal
+          isOpen={isSavePackageModalOpen}
+          onClose={() => setIsSavePackageModalOpen(false)}
+          cropType={
+            quotation.cropType ||
+            (quotation.title?.includes('-')
+              ? quotation.title.split('-')[1]?.trim() || quotation.title.split('-')[0].trim()
+              : 'Café Conilon')
+          }
+          quoteId={quotation.id}
+          producerId={quotation.producerId}
+          items={(quotation.items || []).map((it) => ({
+            productName: it.productName,
+            quantity: it.quantity,
+            unit: it.unit,
+            acceptsGeneric: it.acceptsGeneric ?? true,
+          }))}
+          onSuccess={() => {
+            setSavePackageSuccessMessage('Pacote Tecnológico salvo nas suas predefinições!');
+            setTimeout(() => setSavePackageSuccessMessage(null), 4000);
+          }}
+        />
       )}
     </div>
   );

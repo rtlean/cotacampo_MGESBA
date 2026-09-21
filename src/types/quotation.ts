@@ -21,6 +21,7 @@ export interface QuotationRequest {
   producerPhone?: string;
   deliveryAddress?: string;
   title: string;
+  cropType?: string;
   status: QuotationStatus;
   targetState: SupportedState;
   targetCity: string;

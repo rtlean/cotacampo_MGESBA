@@ -18,8 +18,13 @@ import {
   Layers,
   ArrowRight,
   X,
+  Package,
+  Trash2,
+  Zap,
 } from 'lucide-react';
 import { quotationService } from '../services/quotation.service';
+import { packageService } from '../services/package.service';
+import { TechnologicalPackageDTO } from '../shared/schemas/packages';
 import { QuotationMetrics, QuotationRequest, QuotationStatus } from '../types/quotation';
 
 export const ProducerDashboard: React.FC = () => {
@@ -37,9 +42,21 @@ export const ProducerDashboard: React.FC = () => {
   );
   const [activeTab, setActiveTab] = useState<'ALL' | QuotationStatus>('ALL');
 
+  // US17: Navegação entre Cotações e Pacotes Tecnológicos
+  const [mainTab, setMainTab] = useState<'QUOTATIONS' | 'PACKAGES'>('QUOTATIONS');
+  const [packages, setPackages] = useState<TechnologicalPackageDTO[]>(() =>
+    packageService.getLocalPackages()
+  );
+
   const handleDismissPublishedMessage = () => {
     quotationService.clearFlashMessage();
     setPublishedMessage(null);
+  };
+
+  const handleDeletePackage = async (packageId: string) => {
+    await packageService.deletePackage(packageId);
+    const updated = await packageService.listMyPackages(user?.id || 'produtor_demo_1');
+    setPackages(updated);
   };
 
   useEffect(() => {
@@ -53,14 +70,16 @@ export const ProducerDashboard: React.FC = () => {
     async function loadData() {
       if (!user || user.role !== 'PRODUCER') return;
       try {
-        const [userMetrics, userQuotes] = await Promise.all([
+        const [userMetrics, userQuotes, userPackages] = await Promise.all([
           quotationService.getProducerMetrics(user.id),
           quotationService.getProducerQuotations(user.id),
+          packageService.listMyPackages(user.id),
         ]);
 
         if (isMounted) {
           setMetrics(userMetrics);
           setQuotations(userQuotes);
+          setPackages(userPackages);
         }
       } catch (err) {
         console.error('Erro ao carregar dados do dashboard do produtor:', err);
@@ -355,8 +374,153 @@ export const ProducerDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Content Area: Active Quotations List OR Empty State (Cenário 1 vs Cenário 2) */}
-        {quotations.length === 0 ? (
+        {/* US17: Navegação Superior - Minhas Cotações vs Meus Pacotes Tecnológicos */}
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            type="button"
+            onClick={() => setMainTab('QUOTATIONS')}
+            data-testid="tab-my-quotations"
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              mainTab === 'QUOTATIONS'
+                ? 'bg-agro-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Minhas Cotações ({quotations.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMainTab('PACKAGES')}
+            data-testid="tab-my-packages"
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              mainTab === 'PACKAGES'
+                ? 'bg-agro-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Package className="w-4 h-4 text-harvest-400" />
+            <span>Meus Pacotes Tecnológicos ({packages.length})</span>
+          </button>
+        </div>
+
+        {/* Content Area: Meus Pacotes Tecnológicos OU Minhas Cotações */}
+        {mainTab === 'PACKAGES' ? (
+          /* US17: Seção Meus Pacotes Tecnológicos (Recompra em 1-Clique) */
+          <div
+            className="bg-white rounded-2xl border border-slate-200/80 shadow-soft overflow-hidden animate-fade-in"
+            data-testid="packages-section"
+          >
+            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Package className="w-5 h-5 text-agro-700" />
+                  <span>Meus Pacotes Tecnológicos</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Predefinições de insumos salvas para recompra rápida em 1-clique
+                </p>
+              </div>
+
+              <Link
+                href="/produtor/cotacoes/nova"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold transition-all self-start sm:self-auto shadow-xs"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Nova Cotação</span>
+              </Link>
+            </div>
+
+            <div className="p-6">
+              {packages.length === 0 ? (
+                <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
+                    <Package className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">Nenhum Pacote Tecnológico salvo ainda</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    Você pode salvar pacotes de manejo padronizados (ex: "Adubação de Florada", "Pulverização Preventiva")
+                    ao criar uma cotação com 3 ou mais itens no Wizard ou ao visualizar uma cotação concluída.
+                  </p>
+                  <Link
+                    href="/produtor/cotacoes/nova"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold shadow-xs transition-all"
+                  >
+                    <span>Criar Cotação e Salvar Pacote</span>
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {packages.map((pkg) => (
+                    <div
+                      key={pkg.id}
+                      data-testid={`package-card-${pkg.id}`}
+                      className="p-5 rounded-2xl border border-slate-200/90 hover:border-agro-300 hover:shadow-md transition-all bg-slate-50/50 flex flex-col justify-between gap-4"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-agro-100 text-agro-800 border border-agro-200">
+                              {pkg.cropType}
+                            </span>
+                            <h3 className="font-serif text-base font-bold text-slate-900 mt-1.5">
+                              {pkg.name}
+                            </h3>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePackage(pkg.id)}
+                            title="Excluir pacote"
+                            className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="text-xs text-slate-500">
+                          <span className="font-semibold text-slate-700">
+                            {pkg.itemsCount || pkg.items?.length || 0} produto(s) inclusos:
+                          </span>
+                          <div className="mt-1.5 space-y-1 max-h-24 overflow-y-auto pr-1">
+                            {pkg.items?.map((it, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between text-[11px] bg-white px-2.5 py-1 rounded-lg border border-slate-200/60"
+                              >
+                                <span className="font-medium text-slate-800 truncate max-w-[200px]">
+                                  {it.productName}
+                                </span>
+                                <span className="text-slate-500">
+                                  {it.quantity} {it.unit}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-400">
+                          Criado em {new Date(pkg.createdAt).toLocaleDateString('pt-BR')}
+                        </span>
+
+                        <Link
+                          href={`/produtor/cotacoes/nova?packageId=${pkg.id}`}
+                          data-testid={`btn-reorder-package-${pkg.id}`}
+                          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-agro-700 hover:bg-agro-800 text-white text-xs font-bold shadow-xs hover:shadow transition-all"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-harvest-400" />
+                          <span>Nova Cotação com este Pacote</span>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : quotations.length === 0 ? (
           /* Cenário 2: Estado Vazio */
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-soft p-8 sm:p-12 text-center">
             <div className="max-w-md mx-auto">

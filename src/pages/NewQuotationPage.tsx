@@ -22,11 +22,14 @@ import {
   X,
   Sparkles,
   AlertTriangle,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { TARGET_CROPS } from '../data/target-crops';
 import { searchCatalogProducts, CatalogProduct } from '../data/products';
 import { quotationService } from '../services/quotation.service';
+import { packageService } from '../services/package.service';
+import { SavePackageModal } from '../components/SavePackageModal';
 import { agronomicAiService, PhytosanitaryRestriction } from '../services/agronomic-ai.service';
 import { copilotService } from '../server/services/copilot.service';
 import { CropCopilotOutput } from '../shared/schemas/copilot';
@@ -89,10 +92,50 @@ export const NewQuotationPage: React.FC = () => {
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [publishError, setPublishError] = useState<string | null>(null);
 
-  // Inicialização de fazendas e recuperação de rascunho
+  // US17: Estados de Pacotes Tecnológicos (Salvar Lista & Recompra 1-Clique)
+  const [isSavePackageModalOpen, setIsSavePackageModalOpen] = useState<boolean>(false);
+  const [packageSuccessToast, setPackageSuccessToast] = useState<string | null>(null);
+  const [loadedPackageName, setLoadedPackageName] = useState<string | null>(null);
+
+  // Inicialização de fazendas e recuperação de rascunho / pacote
   useEffect(() => {
     const loadedFarms = quotationService.getProducerFarms(producerUser);
     setFarms(loadedFarms);
+
+    // US17: Recompra em 1-Clique a partir de ?packageId=...
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const packageId = urlParams?.get('packageId');
+
+    if (packageId) {
+      void packageService.getPackageById(packageId).then((pkg) => {
+        if (pkg && pkg.items && pkg.items.length > 0) {
+          const mappedItems: QuotationItem[] = pkg.items.map((it, idx) => ({
+            id: `item_pkg_${idx}_${Date.now()}`,
+            productName: it.productName,
+            quantity: it.quantity,
+            unit: it.unit,
+            acceptsGeneric: it.acceptsGeneric ?? true,
+          }));
+          setItems(mappedItems);
+          setLoadedPackageName(pkg.name);
+
+          // Identifica cultura correspondente
+          const matchingCrop = TARGET_CROPS.find(
+            (c) =>
+              c.name.toLowerCase().includes(pkg.cropType.toLowerCase()) ||
+              pkg.cropType.toLowerCase().includes(c.name.toLowerCase())
+          );
+          if (matchingCrop) {
+            setSelectedCrop(matchingCrop.id as TargetCropId);
+          }
+          if (loadedFarms.length > 0) {
+            setSelectedFarmId(loadedFarms[0].id);
+          }
+          setCurrentStep(2);
+        }
+      });
+      return;
+    }
 
     const draft = quotationService.getDraft();
     if (draft) {
@@ -1207,9 +1250,56 @@ export const NewQuotationPage: React.FC = () => {
               )}
             </div>
 
+            {/* US17: Banner de Pacote Tecnológico Carregado via 1-Clique */}
+            {loadedPackageName && (
+              <div
+                role="status"
+                data-testid="loaded-package-banner"
+                className="bg-emerald-50 border border-emerald-300 rounded-xl p-3.5 text-xs text-emerald-800 flex items-center justify-between gap-3 animate-fade-in"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Package className="w-5 h-5 text-emerald-700 shrink-0" />
+                  <div>
+                    <span className="font-bold text-emerald-950">
+                      Recompra em 1-Clique ativada!
+                    </span>{' '}
+                    Insumos do pacote <strong>"{loadedPackageName}"</strong> foram carregados na sua cotação.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLoadedPackageName(null)}
+                  className="text-emerald-700 hover:text-emerald-900 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* US17: Toast de Sucesso ao Salvar Lista como Pacote */}
+            {packageSuccessToast && (
+              <div
+                role="status"
+                data-testid="package-success-toast"
+                className="bg-emerald-50 border border-emerald-400 rounded-xl p-3.5 text-xs text-emerald-900 flex items-center justify-between gap-2 animate-fade-in"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{packageSuccessToast}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPackageSuccessToast(null)}
+                  className="text-emerald-700 hover:text-emerald-950 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Tabela Dinâmica de Itens da Cotação */}
             <div className="bg-white rounded-2xl shadow-soft border border-slate-200/80 p-6 sm:p-8 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="font-serif text-lg font-bold text-slate-900">
                     Tabela de Itens da Demanda ({items.length})
@@ -1219,12 +1309,27 @@ export const NewQuotationPage: React.FC = () => {
                   </p>
                 </div>
 
-                {items.length > 0 && (
-                  <span className="text-xs font-semibold text-emerald-800 bg-emerald-100/70 px-2.5 py-1 rounded-full flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    {items.length} {items.length === 1 ? 'item adicionado' : 'itens adicionados'}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {/* US17: Cenário 2 - Salvar pacote durante criação (habilitado com 3 ou mais itens) */}
+                  {items.length >= 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSavePackageModalOpen(true)}
+                      data-testid="btn-save-list-as-package"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Package className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Salvar Lista</span>
+                    </button>
+                  )}
+
+                  {items.length > 0 && (
+                    <span className="text-xs font-semibold text-emerald-800 bg-emerald-100/70 px-2.5 py-1 rounded-full flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {items.length} {items.length === 1 ? 'item adicionado' : 'itens adicionados'}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {items.length === 0 ? (
@@ -1701,6 +1806,24 @@ export const NewQuotationPage: React.FC = () => {
           </form>
         )}
       </div>
+
+      {/* US17: Modal para Salvar Lista como Pacote Tecnológico */}
+      <SavePackageModal
+        isOpen={isSavePackageModalOpen}
+        onClose={() => setIsSavePackageModalOpen(false)}
+        cropType={selectedCropObj?.name || 'Cultura Geral'}
+        producerId={producerUser?.id || 'produtor_demo_1'}
+        items={items.map((it) => ({
+          productName: it.productName,
+          quantity: it.quantity,
+          unit: it.unit,
+          acceptsGeneric: it.acceptsGeneric ?? true,
+        }))}
+        onSuccess={() => {
+          setPackageSuccessToast('Pacote Tecnológico salvo nas suas predefinições!');
+          setTimeout(() => setPackageSuccessToast(null), 4000);
+        }}
+      />
     </div>
   );
 };

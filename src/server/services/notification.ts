@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { getCityDistanceKm } from '../../utils/geo';
 import { SupportedState } from '../../types/user';
 import { PublishQuotationInput } from '../../shared/schemas/cotacoes';
@@ -15,6 +16,129 @@ export interface SendMessageResult {
 
 export interface IWhatsAppProvider {
   sendMessage(payload: SendMessagePayload): Promise<SendMessageResult>;
+}
+
+/**
+ * Validação tipada das variáveis de ambiente da Evolution API
+ */
+export const evolutionEnvSchema = z.object({
+  apiUrl: z.string().url('EVOLUTION_API_URL deve ser uma URL válida'),
+  apiKey: z.string().min(1, 'EVOLUTION_API_KEY é obrigatória'),
+  instanceName: z.string().min(1, 'EVOLUTION_INSTANCE_NAME é obrigatório'),
+});
+
+export type EvolutionConfig = z.infer<typeof evolutionEnvSchema>;
+
+/**
+ * Sanitiza o número do telefone garantindo DDI 55 e apenas dígitos
+ */
+export function sanitizePhoneNumber(phone: string): string {
+  const clean = phone.replace(/\D/g, '');
+  if (clean.startsWith('55')) {
+    return clean;
+  }
+  return `55${clean}`;
+}
+
+/**
+ * Obtém as credenciais da Evolution API a partir do ambiente se configuradas
+ */
+export function getEvolutionConfigFromEnv(): EvolutionConfig | null {
+  const apiUrl =
+    process.env.EVOLUTION_API_URL ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_API_URL);
+  const apiKey =
+    process.env.EVOLUTION_API_KEY ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_API_KEY);
+  const instanceName =
+    process.env.EVOLUTION_INSTANCE_NAME ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_INSTANCE_NAME);
+
+  if (!apiUrl || !apiKey || !instanceName) {
+    return null;
+  }
+
+  const parsed = evolutionEnvSchema.safeParse({ apiUrl, apiKey, instanceName });
+  if (!parsed.success) {
+    console.warn('[EvolutionConfig] Configuração inválida da Evolution API:', parsed.error.format());
+    return null;
+  }
+
+  return parsed.data;
+}
+
+/**
+ * Provedor de integração oficial com a Evolution API via HTTP
+ */
+export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
+  private config: EvolutionConfig;
+  private cleanBaseUrl: string;
+
+  constructor(config: EvolutionConfig) {
+    const validated = evolutionEnvSchema.parse(config);
+    this.config = validated;
+    // Normaliza URL base removendo /manager final ou barras excedentes
+    this.cleanBaseUrl = validated.apiUrl.replace(/\/manager\/?$/, '').replace(/\/+$/, '');
+  }
+
+  public getEndpoint(): string {
+    return `${this.cleanBaseUrl}/message/sendText/${this.config.instanceName}`;
+  }
+
+  async sendMessage(payload: SendMessagePayload): Promise<SendMessageResult> {
+    const targetNumber = sanitizePhoneNumber(payload.toPhone);
+    const endpoint = this.getEndpoint();
+
+    const requestBody = {
+      number: targetNumber,
+      options: {
+        delay: 1200,
+        presence: 'composing' as const,
+      },
+      textMessage: {
+        text: payload.message,
+      },
+    };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: this.config.apiKey,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        const errorMsg = `[Evolution API Error] Status HTTP ${response.status} ao enviar para ${targetNumber}: ${errorBody}`;
+        console.error(errorMsg);
+        throw new Error(`Evolution API HTTP ${response.status}: ${errorBody}`);
+      }
+
+      const responseData = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      const keyObj = responseData?.key as Record<string, unknown> | undefined;
+      const messageId =
+        (typeof keyObj?.id === 'string' ? keyObj.id : null) ||
+        (typeof responseData?.messageId === 'string' ? responseData.messageId : null) ||
+        `evo_${Date.now()}`;
+
+      return {
+        success: true,
+        messageId,
+      };
+    } catch (error) {
+      console.error(
+        `[EvolutionWhatsAppProvider] Falha ao enviar mensagem para ${targetNumber}:`,
+        error instanceof Error ? error.message : error
+      );
+      throw error;
+    }
+  }
 }
 
 /**
@@ -60,6 +184,19 @@ export class MockWhatsAppProvider implements IWhatsAppProvider {
       messageId: `mock_msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     };
   }
+}
+
+/**
+ * Fábrica para selecionar provedor de acordo com o ambiente
+ */
+export function createDefaultWhatsAppProvider(): IWhatsAppProvider {
+  if (process.env.NODE_ENV !== 'test') {
+    const config = getEvolutionConfigFromEnv();
+    if (config) {
+      return new EvolutionWhatsAppProvider(config);
+    }
+  }
+  return new MockWhatsAppProvider();
 }
 
 export interface ResellerContact {
@@ -157,7 +294,7 @@ export class WhatsAppService {
   private resellers: ResellerContact[];
 
   constructor(provider?: IWhatsAppProvider, customResellers?: ResellerContact[]) {
-    this.provider = provider || new MockWhatsAppProvider();
+    this.provider = provider || createDefaultWhatsAppProvider();
     this.resellers = customResellers ? [...customResellers] : [...DEFAULT_MOCK_RESELLERS];
   }
 

@@ -2,8 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   WhatsAppService,
   MockWhatsAppProvider,
+  EvolutionWhatsAppProvider,
   formatQuotationMessage,
+  sanitizePhoneNumber,
+  getEvolutionConfigFromEnv,
+  createDefaultWhatsAppProvider,
   ResellerContact,
+  EvolutionConfig,
 } from './notification';
 import { PublishQuotationInput } from '../../shared/schemas/cotacoes';
 import * as geoUtils from '../../utils/geo';
@@ -275,6 +280,238 @@ describe('US16 - WhatsAppService (Serviço de Notificação via WhatsApp para Re
       }, { timeout: 1000 });
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('EvolutionWhatsAppProvider - Integração Real com a Evolution API', () => {
+    const validConfig: EvolutionConfig = {
+      apiUrl: 'https://iconickakapo-evolution.cloudfy.live/manager',
+      apiKey: 'test_evolution_secret_key',
+      instanceName: 'CotaCampo',
+    };
+
+    it('deve sanitizar números de telefone garantindo o prefixo DDI 55 e apenas dígitos', () => {
+      expect(sanitizePhoneNumber('(27) 99888-1001')).toBe('5527998881001');
+      expect(sanitizePhoneNumber('27998881001')).toBe('5527998881001');
+      expect(sanitizePhoneNumber('5527998881001')).toBe('5527998881001');
+      expect(sanitizePhoneNumber('+55 (33) 98765-4321')).toBe('5533987654321');
+    });
+
+    it('deve normalizar o endpoint da API removendo /manager e barras finais', () => {
+      const provider1 = new EvolutionWhatsAppProvider(validConfig);
+      expect(provider1.getEndpoint()).toBe(
+        'https://iconickakapo-evolution.cloudfy.live/message/sendText/CotaCampo'
+      );
+
+      const provider2 = new EvolutionWhatsAppProvider({
+        apiUrl: 'https://api.evolution.com/',
+        apiKey: 'key',
+        instanceName: 'Instancia1',
+      });
+      expect(provider2.getEndpoint()).toBe(
+        'https://api.evolution.com/message/sendText/Instancia1'
+      );
+    });
+
+    it('deve enviar mensagem com sucesso via fetch nativo no endpoint correto (caminho feliz 200/201)', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          key: { id: 'evo_msg_123456' },
+        }),
+      });
+      global.fetch = mockFetch;
+
+      const provider = new EvolutionWhatsAppProvider(validConfig);
+      const result = await provider.sendMessage({
+        toPhone: '(27) 99888-1001',
+        message: 'Mensagem teste de cotação',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('evo_msg_123456');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [calledUrl, calledOptions] = mockFetch.mock.calls[0];
+
+      expect(calledUrl).toBe(
+        'https://iconickakapo-evolution.cloudfy.live/message/sendText/CotaCampo'
+      );
+      expect(calledOptions.method).toBe('POST');
+      expect(calledOptions.headers).toEqual({
+        'Content-Type': 'application/json',
+        apikey: 'test_evolution_secret_key',
+      });
+
+      const parsedBody = JSON.parse(calledOptions.body);
+      expect(parsedBody).toEqual({
+        number: '5527998881001',
+        options: {
+          delay: 1200,
+          presence: 'composing',
+        },
+        textMessage: {
+          text: 'Mensagem teste de cotação',
+        },
+      });
+    });
+
+    it('deve gerar messageId de fallback se a resposta não contiver key.id', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          messageId: 'alt_msg_789',
+        }),
+      });
+      global.fetch = mockFetch;
+
+      const provider = new EvolutionWhatsAppProvider(validConfig);
+      const result = await provider.sendMessage({
+        toPhone: '5527998881002',
+        message: 'Teste fallback ID',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('alt_msg_789');
+    });
+
+    it('deve tratar com segurança resposta HTTP não-ok (400 / 500) logando e lançando erro', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({ message: 'Instância desconectada do WhatsApp' }),
+      });
+      global.fetch = mockFetch;
+
+      const provider = new EvolutionWhatsAppProvider(validConfig);
+
+      await expect(
+        provider.sendMessage({
+          toPhone: '5527998881003',
+          message: 'Mensagem com erro 400',
+        })
+      ).rejects.toThrow('Evolution API HTTP 400');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[Evolution API Error] Status HTTP 400 ao enviar para 5527998881003:')
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('deve tratar falhas de conexão / rede do fetch nativo', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const mockFetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      global.fetch = mockFetch;
+
+      const provider = new EvolutionWhatsAppProvider(validConfig);
+
+      await expect(
+        provider.sendMessage({
+          toPhone: '5527998881004',
+          message: 'Falha de rede',
+        })
+      ).rejects.toThrow('ECONNREFUSED');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[EvolutionWhatsAppProvider] Falha ao enviar mensagem para 5527998881004:'),
+        'ECONNREFUSED'
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('deve validar parâmetros de configuração com Zod e lançar erro para dados inválidos', () => {
+      // URL inválida
+      expect(() => {
+        new EvolutionWhatsAppProvider({
+          apiUrl: 'nao-e-uma-url',
+          apiKey: 'key',
+          instanceName: 'instancia',
+        });
+      }).toThrow();
+
+      // ApiKey vazia
+      expect(() => {
+        new EvolutionWhatsAppProvider({
+          apiUrl: 'https://api.com',
+          apiKey: '',
+          instanceName: 'instancia',
+        });
+      }).toThrow();
+
+      // InstanceName vazio
+      expect(() => {
+        new EvolutionWhatsAppProvider({
+          apiUrl: 'https://api.com',
+          apiKey: 'key',
+          instanceName: '',
+        });
+      }).toThrow();
+    });
+
+    describe('getEvolutionConfigFromEnv e createDefaultWhatsAppProvider', () => {
+      const originalEnv = process.env;
+
+      beforeEach(() => {
+        process.env = { ...originalEnv };
+      });
+
+      it('deve retornar null se as variáveis de ambiente não estiverem completas', () => {
+        delete process.env.EVOLUTION_API_URL;
+        delete process.env.EVOLUTION_API_KEY;
+        delete process.env.EVOLUTION_INSTANCE_NAME;
+
+        expect(getEvolutionConfigFromEnv()).toBeNull();
+      });
+
+      it('deve retornar null e emitir aviso se as variáveis existirem mas forem inválidas segundo o schema Zod', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        process.env.EVOLUTION_API_URL = 'url-invalida-sem-protocolo';
+        process.env.EVOLUTION_API_KEY = 'secret123';
+        process.env.EVOLUTION_INSTANCE_NAME = 'InstanciaTeste';
+
+        expect(getEvolutionConfigFromEnv()).toBeNull();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('[EvolutionConfig] Configuração inválida'),
+          expect.any(Object)
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('deve retornar config válida quando todas as variáveis de ambiente estiverem presentes', () => {
+        process.env.EVOLUTION_API_URL = 'https://evolution.teste.com';
+        process.env.EVOLUTION_API_KEY = 'secret123';
+        process.env.EVOLUTION_INSTANCE_NAME = 'InstanciaTeste';
+
+        const config = getEvolutionConfigFromEnv();
+        expect(config).toEqual({
+          apiUrl: 'https://evolution.teste.com',
+          apiKey: 'secret123',
+          instanceName: 'InstanciaTeste',
+        });
+      });
+
+      it('deve retornar MockWhatsAppProvider em ambiente de teste por padrão', () => {
+        process.env.NODE_ENV = 'test';
+        const provider = createDefaultWhatsAppProvider();
+        expect(provider).toBeInstanceOf(MockWhatsAppProvider);
+      });
+
+      it('deve retornar EvolutionWhatsAppProvider em produção quando as variáveis existirem', () => {
+        process.env.NODE_ENV = 'production';
+        process.env.EVOLUTION_API_URL = 'https://evolution.prod.com';
+        process.env.EVOLUTION_API_KEY = 'prod-key';
+        process.env.EVOLUTION_INSTANCE_NAME = 'ProdInstance';
+
+        const provider = createDefaultWhatsAppProvider();
+        expect(provider).toBeInstanceOf(EvolutionWhatsAppProvider);
+      });
     });
   });
 });

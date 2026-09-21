@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Route, Switch, Redirect, useLocation } from 'wouter';
+import { Route, Switch, Redirect, useLocation, Link } from 'wouter';
 import { Navbar } from './components/Navbar';
 import { RegisterPage } from './pages/RegisterPage';
 import { LoginPage } from './pages/LoginPage';
@@ -11,6 +11,7 @@ import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { NewQuotationPage } from './pages/NewQuotationPage';
 import { QuotationComparativePage } from './pages/QuotationComparativePage';
 import { SubmitBidPage } from './pages/SubmitBidPage';
+import { ResetDataPage } from './pages/ResetDataPage';
 import { supabase } from './services/supabase';
 
 export const App: React.FC = () => {
@@ -67,6 +68,8 @@ export const App: React.FC = () => {
           <Route path="/revenda/dashboard" component={ResellerDashboard} />
           <Route path="/revenda/oportunidades" component={OpportunitiesPage} />
           <Route path="/revenda/cotacoes/:id/proposta" component={SubmitBidPage} />
+          <Route path="/limpar-dados" component={ResetDataPage} />
+          <Route path="/reset" component={ResetDataPage} />
           <Route>
             <Redirect to="/cadastro" />
           </Route>
@@ -77,7 +80,13 @@ export const App: React.FC = () => {
       <footer className="border-t border-slate-200/80 bg-white py-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p>© {new Date().getFullYear()} CotaCampo. Conectando produtores e revendas de MG, ES e BA.</p>
-          <p className="text-slate-400">Especializado em Café, Cacau, Pimenta-do-reino e Mamão</p>
+          <div className="flex items-center gap-3 text-slate-400">
+            <span>Especializado em Café, Cacau, Pimenta-do-reino e Mamão</span>
+            <span>•</span>
+            <Link href="/limpar-dados" className="hover:text-red-600 transition-colors underline cursor-pointer">
+              Zerar Dados (Reset)
+            </Link>
+          </div>
         </div>
       </footer>
     </div>

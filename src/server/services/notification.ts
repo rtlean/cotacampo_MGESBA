@@ -46,14 +46,23 @@ export function sanitizePhoneNumber(phone: string): string {
 export function getEvolutionConfigFromEnv(): EvolutionConfig | null {
   const apiUrl =
     process.env.EVOLUTION_API_URL ||
+    process.env.VITE_EVOLUTION_API_URL ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_EVOLUTION_API_URL) ||
     (typeof import.meta !== 'undefined' &&
       (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_API_URL);
   const apiKey =
     process.env.EVOLUTION_API_KEY ||
+    process.env.VITE_EVOLUTION_API_KEY ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_EVOLUTION_API_KEY) ||
     (typeof import.meta !== 'undefined' &&
       (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_API_KEY);
   const instanceName =
     process.env.EVOLUTION_INSTANCE_NAME ||
+    process.env.VITE_EVOLUTION_INSTANCE_NAME ||
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_EVOLUTION_INSTANCE_NAME) ||
     (typeof import.meta !== 'undefined' &&
       (import.meta as unknown as { env?: Record<string, string> })?.env?.EVOLUTION_INSTANCE_NAME);
 
@@ -315,7 +324,7 @@ export class WhatsAppService {
    * Consulta espacial/geográfica: localiza revendas ativas cujo raio de cobertura atenda o município/UF
    */
   public getEligibleResellers(targetCity: string, targetState: SupportedState): ResellerContact[] {
-    return this.resellers.filter((reseller) => {
+    const list = this.resellers.filter((reseller) => {
       if (!reseller.active) return false;
 
       // Mesmo município e estado: cobertura garantida
@@ -340,6 +349,33 @@ export class WhatsAppService {
         return reseller.state === targetState;
       }
     });
+
+    // Se houver número de teste configurado em variável de ambiente ou localStorage, inclui para teste real
+    const testPhone =
+      (typeof process !== 'undefined' &&
+        (process.env.WHATSAPP_TEST_RECIPIENT || process.env.VITE_WHATSAPP_TEST_RECIPIENT)) ||
+      (typeof import.meta !== 'undefined' &&
+        (import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_WHATSAPP_TEST_RECIPIENT) ||
+      (typeof window !== 'undefined' ? window.localStorage?.getItem('cotacampo_test_whatsapp') : null);
+
+    if (testPhone && testPhone.trim()) {
+      const sanitizedTestPhone = sanitizePhoneNumber(testPhone.trim());
+      const alreadyInList = list.some((r) => sanitizePhoneNumber(r.phone) === sanitizedTestPhone);
+      if (!alreadyInList) {
+        list.push({
+          id: 'res_test_live',
+          name: 'Revenda de Teste (WhatsApp Direto)',
+          companyName: 'Ambiente de Teste Real',
+          phone: sanitizedTestPhone,
+          city: targetCity,
+          state: targetState,
+          deliveryRadiusKm: 99999,
+          active: true,
+        });
+      }
+    }
+
+    return list;
   }
 
   /**

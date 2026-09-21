@@ -467,6 +467,9 @@ describe('US16 - WhatsAppService (Serviço de Notificação via WhatsApp para Re
         delete process.env.EVOLUTION_API_URL;
         delete process.env.EVOLUTION_API_KEY;
         delete process.env.EVOLUTION_INSTANCE_NAME;
+        delete process.env.VITE_EVOLUTION_API_URL;
+        delete process.env.VITE_EVOLUTION_API_KEY;
+        delete process.env.VITE_EVOLUTION_INSTANCE_NAME;
 
         expect(getEvolutionConfigFromEnv()).toBeNull();
       });

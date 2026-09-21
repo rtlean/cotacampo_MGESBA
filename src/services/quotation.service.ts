@@ -14,6 +14,7 @@ import {
 import { ProducerProfile, SupportedState } from '../types/user';
 import { Step3CommercialSchema } from '../schemas/quotation-wizard.schema';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { whatsAppService } from '../server/services/notification';
 
 const LOCAL_STORAGE_KEY = 'cotacampo_quotations';
 const DRAFT_STORAGE_KEY = 'cotacampo_quotation_draft';
@@ -345,6 +346,23 @@ export const quotationService = {
       } catch {
         // Tabela opcional ou em migração
       }
+    }
+
+    // US16: Disparo de Notificação Ativa via WhatsApp para Revendas Elegíveis
+    try {
+      whatsAppService.notifyEligibleResellersAsync({
+        id: quote.id,
+        title: quote.title || `Cotação #${quote.displayCode || quote.id}`,
+        cropName: quote.title || 'Insumos Agrícolas',
+        targetCity: quote.targetCity || 'Linhares',
+        targetState: (quote.targetState as SupportedState) || 'ES',
+        itemsCount: Math.max(1, quote.itemsCount || quote.items?.length || 1),
+        freightType: quote.freightType === 'FOB' ? 'FOB' : 'CIF',
+        proposalLimitHours: quote.proposalLimitHours || 48,
+        appLink: typeof window !== 'undefined' ? `${window.location.origin}/oportunidades` : undefined,
+      });
+    } catch (err) {
+      console.error('[QuotationService] Erro ao disparar notificações via WhatsApp:', err);
     }
 
     return [notification];

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocation, Link } from 'wouter';
 import { FormInput } from '../components/FormInput';
 import { loginSchema } from '../schemas/login.schema';
-import { Sprout, Mail, Lock, LogIn, ArrowRight, Store, AlertCircle } from 'lucide-react';
+import { Sprout, Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -39,36 +39,6 @@ export const LoginPage: React.FC = () => {
       }
     } catch {
       setError('E-mail/telefone ou senha incorretos.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDemoProducer = async () => {
-    setIsSubmitting(true);
-    try {
-      const res = await login({
-        identifier: 'produtor.linhares@agro.com.br',
-        password: 'demo',
-      });
-      if (res.success) {
-        setLocation('/produtor/dashboard');
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDemoReseller = async () => {
-    setIsSubmitting(true);
-    try {
-      const res = await login({
-        identifier: 'revenda.linhares@agro.com.br',
-        password: 'demo',
-      });
-      if (res.success) {
-        setLocation('/revenda/dashboard');
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -155,36 +125,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Shortcuts */}
-          <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
-            <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 text-center mb-2">
-              Demonstração Rápida Sem Senha
-            </span>
-            <button
-              type="button"
-              onClick={handleDemoProducer}
-              className="w-full py-2 px-3 rounded-lg bg-agro-50 hover:bg-agro-100 text-agro-800 text-xs font-semibold border border-agro-200 transition-colors flex items-center justify-between cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Sprout className="w-3.5 h-3.5 text-agro-600" />
-                <span>Produtor Rural (Linhares - ES)</span>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5 text-agro-600" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDemoReseller}
-              className="w-full py-2 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold border border-blue-200 transition-colors flex items-center justify-between cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Store className="w-3.5 h-3.5 text-blue-600" />
-                <span>Revenda de Insumos (Linhares - ES)</span>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5 text-blue-600" />
-            </button>
-          </div>
 
           <div className="mt-6 text-center text-xs text-slate-500">
             Ainda não possui conta?{' '}

@@ -189,35 +189,6 @@ describe('US03 – Autenticação Unificada e Roteamento por Perfil', () => {
     expect(forgotLink).toHaveAttribute('href', '/recuperar-senha');
   });
 
-  it('deve realizar login rápido de demonstração para Produtor Demo', async () => {
-    render(
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    );
-
-    const demoProdBtn = screen.getByRole('button', { name: /Produtor Rural \(Linhares - ES\)/i });
-    fireEvent.click(demoProdBtn);
-
-    await waitFor(() => {
-      expect(window.location.pathname).toBe('/produtor/dashboard');
-    });
-  });
-
-  it('deve realizar login rápido de demonstração para Revenda Demo', async () => {
-    render(
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    );
-
-    const demoResBtn = screen.getByRole('button', { name: /Revenda de Insumos \(Linhares - ES\)/i });
-    fireEvent.click(demoResBtn);
-
-    await waitFor(() => {
-      expect(window.location.pathname).toBe('/revenda/dashboard');
-    });
-  });
 
   it('deve exibir erro quando submetido com campos vazios', async () => {
     render(
